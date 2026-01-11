@@ -250,7 +250,9 @@ class ReplayEngine:
             state = State(
                 facts=copy.deepcopy(cached_state.facts),
                 metrics=copy.deepcopy(cached_state.metrics),
-                errors=copy.deepcopy(cached_state.errors)
+                errors=copy.deepcopy(cached_state.errors),
+                current_agent=cached_state.current_agent,
+                current_step=cached_state.current_step
             )
             start_seq = nearest_cached + 1
         else:

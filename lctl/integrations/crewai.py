@@ -386,20 +386,24 @@ class LCTLCrew:
         """Callback for task completion."""
         try:
             task_description = ""
+            task_output_text = ""
 
             if hasattr(task_output, "description"):
                 task_description = str(task_output.description)[:200]
 
             if hasattr(task_output, "raw"):
-                str(task_output.raw)[:500]
+                task_output_text = str(task_output.raw)[:500]
             elif hasattr(task_output, "output"):
-                str(task_output.output)[:500]
+                task_output_text = str(task_output.output)[:500]
 
             # Add fact about task completion
             fact_id = f"task-{len(self._session.chain.events)}"
+            fact_text = f"Task completed: {task_description}"
+            if task_output_text:
+                fact_text += f" | Output: {task_output_text}"
             self._session.add_fact(
                 fact_id=fact_id,
-                text=f"Task completed: {task_description}",
+                text=fact_text,
                 confidence=1.0,
                 source="crew-execution"
             )
