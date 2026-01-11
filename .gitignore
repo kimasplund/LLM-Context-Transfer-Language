@@ -8,3 +8,11 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+.claude
+.venv/
+.venv-test/
+.ruff_cache/
+.env
+.DS_Store
+*.log
+coverage.xml
