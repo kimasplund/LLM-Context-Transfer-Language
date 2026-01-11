@@ -1,6 +1,6 @@
 """LCTL Event Sourcing Core - The foundation for time-travel debugging."""
 
-import copy
+import bisect
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -204,12 +204,15 @@ class State:
         elif event.type == EventType.FACT_MODIFIED:
             fact_id = event.data.get("id")
             if fact_id and fact_id in self.facts:
-                self.facts[fact_id].update({
+                # Use copy-on-write to allow shallow copying of State
+                new_fact = self.facts[fact_id].copy()
+                new_fact.update({
                     "text": event.data.get("text", self.facts[fact_id]["text"]),
                     "confidence": event.data.get("confidence", self.facts[fact_id]["confidence"]),
                     "modified_at": event.seq,
                     "reason": event.data.get("reason", "")
                 })
+                self.facts[fact_id] = new_fact
 
         elif event.type == EventType.ERROR:
             self.errors.append({
@@ -238,19 +241,20 @@ class ReplayEngine:
         """Replay events up to target_seq and return state."""
         # Check cache for nearest checkpoint
         nearest_cached = 0
-        for cached_seq in sorted(self._state_cache.keys()):
-            if cached_seq <= target_seq:
-                nearest_cached = cached_seq
-            else:
-                break
+        sorted_keys = sorted(self._state_cache.keys())
+        # Use bisect to find nearest cached sequence <= target_seq
+        idx = bisect.bisect_right(sorted_keys, target_seq)
+        if idx > 0:
+            nearest_cached = sorted_keys[idx - 1]
 
         # Start from cached state or fresh
         if nearest_cached > 0:
             cached_state = self._state_cache[nearest_cached]
+            # Use shallow copies because apply_event uses copy-on-write for mutable internals
             state = State(
-                facts=copy.deepcopy(cached_state.facts),
-                metrics=copy.deepcopy(cached_state.metrics),
-                errors=copy.deepcopy(cached_state.errors),
+                facts=cached_state.facts.copy(),
+                metrics=cached_state.metrics.copy(),
+                errors=cached_state.errors.copy(),
                 current_agent=cached_state.current_agent,
                 current_step=cached_state.current_step
             )
@@ -259,13 +263,32 @@ class ReplayEngine:
             state = State()
             start_seq = 1
 
+        # Find start index using bisect if events are sorted by seq
+        # (Assuming events are always appended in order, which is the contract)
+        events_start_idx = 0
+        if start_seq > 1 and self.chain.events:
+             # Binary search to find the first event with seq >= start_seq.
+             # Note: This relies on chain.events being sorted by seq.
+             # Requires Python >= 3.10 for key argument support in bisect.
+             events_start_idx = bisect.bisect_left(self.chain.events, start_seq, key=lambda e: e.seq)
+
         # Apply events
-        for event in self.chain.events:
-            if event.seq < start_seq:
-                continue
+        for i in range(events_start_idx, len(self.chain.events)):
+            event = self.chain.events[i]
             if event.seq > target_seq:
                 break
+            # Double check seq in case list wasn't perfectly sorted or bisect found something else
+            if event.seq < start_seq:
+                continue
+
             state.apply_event(event)
+
+        # Cache the result
+        # We cache the state object directly. Future replay_to calls will perform a shallow copy.
+        # Since State.apply_event uses Copy-on-Write for mutable internals (facts),
+        # this is safe provided the user treats the returned State as immutable or
+        # understands that deep modifications could affect the cache (though CoW mitigates this).
+        self._state_cache[target_seq] = state
 
         return state
 
