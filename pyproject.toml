@@ -60,8 +60,17 @@ crewai = [
 autogen = [
     "pyautogen>=0.7.0",
 ]
+dspy = [
+    "dspy-ai>=2.0.0",
+]
+llamaindex = [
+    "llama-index>=0.10.0",
+]
+openai-agents = [
+    "openai-agents>=0.1.0",
+]
 all = [
-    "lctl[dashboard,langchain,crewai,autogen]",
+    "lctl[dashboard,langchain,crewai,autogen,dspy,llamaindex,openai-agents]",
 ]
 
 [project.scripts]
