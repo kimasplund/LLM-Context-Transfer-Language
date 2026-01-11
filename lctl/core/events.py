@@ -1,12 +1,14 @@
 """LCTL Event Sourcing Core - The foundation for time-travel debugging."""
 
+import copy
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-import json
-import yaml
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 
 class EventType(str, Enum):
@@ -45,10 +47,34 @@ class Event:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Event":
+        """Create Event from dictionary.
+
+        Raises:
+            ValueError: If required fields are missing or invalid.
+        """
+        # Validate required fields
+        required_fields = ["seq", "type", "timestamp", "agent"]
+        missing = [f for f in required_fields if f not in d]
+        if missing:
+            raise ValueError(f"Event missing required fields: {missing}")
+
+        # Parse type
+        event_type = d["type"]
+        if event_type in [e.value for e in EventType]:
+            event_type = EventType(event_type)
+
+        # Parse timestamp
+        timestamp = d["timestamp"]
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp)
+            except ValueError as e:
+                raise ValueError(f"Invalid timestamp format '{d['timestamp']}': {e}")
+
         return cls(
             seq=d["seq"],
-            type=EventType(d["type"]) if d["type"] in [e.value for e in EventType] else d["type"],
-            timestamp=datetime.fromisoformat(d["timestamp"]) if isinstance(d["timestamp"], str) else d["timestamp"],
+            type=event_type,
+            timestamp=timestamp,
             agent=d["agent"],
             data=d.get("data", {})
         )
@@ -82,12 +108,37 @@ class Chain:
 
     @classmethod
     def load(cls, path: Path) -> "Chain":
-        """Load chain from file (JSON or YAML)."""
-        content = path.read_text()
-        if path.suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(content)
-        else:
-            data = json.loads(content)
+        """Load chain from file (JSON or YAML).
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file is empty, has invalid format, or malformed data.
+        """
+        if not path.exists():
+            raise FileNotFoundError(f"Chain file not found: {path}")
+
+        try:
+            content = path.read_text()
+        except PermissionError:
+            raise PermissionError(f"Permission denied reading chain file: {path}")
+
+        if not content.strip():
+            raise ValueError(f"Chain file is empty: {path}")
+
+        try:
+            if path.suffix in (".yaml", ".yml"):
+                data = yaml.safe_load(content)
+            else:
+                data = json.loads(content)
+        except (json.JSONDecodeError, yaml.YAMLError) as e:
+            raise ValueError(f"Invalid file format in {path}: {e}")
+
+        if data is None:
+            raise ValueError(f"Chain file contains no data: {path}")
+
+        if not isinstance(data, dict):
+            raise ValueError(f"Chain file must contain a dictionary, got {type(data).__name__}: {path}")
+
         return cls.from_dict(data)
 
     def save(self, path: Path) -> None:
@@ -185,9 +236,11 @@ class ReplayEngine:
 
         # Start from cached state or fresh
         if nearest_cached > 0:
+            cached_state = self._state_cache[nearest_cached]
             state = State(
-                facts=dict(self._state_cache[nearest_cached].facts),
-                metrics=dict(self._state_cache[nearest_cached].metrics)
+                facts=copy.deepcopy(cached_state.facts),
+                metrics=copy.deepcopy(cached_state.metrics),
+                errors=copy.deepcopy(cached_state.errors)
             )
             start_seq = nearest_cached + 1
         else:

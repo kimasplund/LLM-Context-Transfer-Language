@@ -1,11 +1,35 @@
 """LCTL CLI - Time-travel debugging for multi-agent LLM workflows."""
 
-import click
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
-from ..core.events import Chain, ReplayEngine, State
+import click
+
+from ..core.events import Chain, Event, ReplayEngine, State
+
+
+def _load_chain_safely(chain_file: str) -> Optional[Chain]:
+    """Load a chain file with proper error handling.
+
+    Returns:
+        Chain if successful, None if failed (error message already printed).
+    """
+    try:
+        return Chain.load(Path(chain_file))
+    except FileNotFoundError as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        return None
+    except PermissionError as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        return None
+    except ValueError as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        return None
+    except Exception as e:
+        click.echo(click.style(f"Unexpected error loading chain: {e}", fg="red"), err=True)
+        return None
 
 
 @click.group()
@@ -19,7 +43,7 @@ def cli():
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 @click.option("--to-seq", "-s", type=int, help="Replay to specific sequence number")
 @click.option("--verbose", "-v", is_flag=True, help="Show detailed event output")
 def replay(chain_file: str, to_seq: Optional[int], verbose: bool):
@@ -29,7 +53,10 @@ def replay(chain_file: str, to_seq: Optional[int], verbose: bool):
         lctl replay chain.lctl.json
         lctl replay --to-seq 10 chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
+
     engine = ReplayEngine(chain)
 
     if not chain.events:
@@ -59,11 +86,13 @@ def replay(chain_file: str, to_seq: Optional[int], verbose: bool):
         click.echo("Facts:")
         for fid, fact in state.facts.items():
             conf = fact.get('confidence', 1.0)
-            click.echo(f"  {fid}: {fact['text'][:60]}... (conf: {conf:.2f})")
+            text = fact.get('text', '') or ''
+            display_text = text[:60] + "..." if len(text) > 60 else text
+            click.echo(f"  {fid}: {display_text} (conf: {conf:.2f})")
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def stats(chain_file: str, as_json: bool):
     """Show performance statistics for a chain.
@@ -72,7 +101,10 @@ def stats(chain_file: str, as_json: bool):
         lctl stats chain.lctl.json
         lctl stats --json chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
+
     engine = ReplayEngine(chain)
     state = engine.replay_all()
 
@@ -113,7 +145,7 @@ def stats(chain_file: str, as_json: bool):
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 @click.option("--top", "-n", default=5, help="Show top N bottlenecks")
 def bottleneck(chain_file: str, top: int):
     """Analyze performance bottlenecks.
@@ -122,10 +154,14 @@ def bottleneck(chain_file: str, top: int):
         lctl bottleneck chain.lctl.json
         lctl bottleneck --top 3 chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
+
     engine = ReplayEngine(chain)
 
-    bottlenecks = engine.find_bottlenecks()[:top]
+    all_bottlenecks = engine.find_bottlenecks()
+    bottlenecks = all_bottlenecks[:top] if top > 0 else []
 
     if not bottlenecks:
         click.echo("No step timing data found.")
@@ -136,22 +172,25 @@ def bottleneck(chain_file: str, top: int):
         duration_s = step["duration_ms"] / 1000
         click.echo(f"  {i}. {step['agent']} (seq {step['seq']}): {duration_s:.1f}s ({step['percentage']:.0f}%)")
 
-    # Recommendations
+    # Recommendations - check list is not empty before accessing index
     click.echo()
-    if bottlenecks[0]["percentage"] > 50:
+    if bottlenecks and bottlenecks[0]["percentage"] > 50:
         click.echo(f"Recommendation: {bottlenecks[0]['agent']} is a major bottleneck ({bottlenecks[0]['percentage']:.0f}% of time).")
         click.echo("Consider: parallelization, caching, or faster model.")
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 def confidence(chain_file: str):
     """Show confidence timeline for facts.
 
     Examples:
         lctl confidence chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
+
     engine = ReplayEngine(chain)
 
     timelines = engine.get_confidence_timeline()
@@ -180,16 +219,21 @@ def confidence(chain_file: str):
 
 
 @cli.command("diff")
-@click.argument("chain1", type=click.Path(exists=True))
-@click.argument("chain2", type=click.Path(exists=True))
+@click.argument("chain1", type=click.Path())
+@click.argument("chain2", type=click.Path())
 def diff_chains(chain1: str, chain2: str):
     """Compare two chains and find divergence.
 
     Examples:
         lctl diff chain-v1.lctl.json chain-v2.lctl.json
     """
-    c1 = Chain.load(Path(chain1))
-    c2 = Chain.load(Path(chain2))
+    c1 = _load_chain_safely(chain1)
+    if c1 is None:
+        sys.exit(1)
+
+    c2 = _load_chain_safely(chain2)
+    if c2 is None:
+        sys.exit(1)
 
     engine1 = ReplayEngine(c1)
     engine2 = ReplayEngine(c2)
@@ -216,14 +260,17 @@ def diff_chains(chain1: str, chain2: str):
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 def trace(chain_file: str):
     """Show step-level execution trace.
 
     Examples:
         lctl trace chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
+
     engine = ReplayEngine(chain)
 
     trace_data = engine.get_trace()
@@ -258,7 +305,7 @@ def trace(chain_file: str):
 
 
 @cli.command()
-@click.argument("chain_file", type=click.Path(exists=True))
+@click.argument("chain_file", type=click.Path())
 @click.option("--port", "-p", default=8080, help="Port for web UI")
 def debug(chain_file: str, port: int):
     """Launch visual debugger (web UI).
@@ -267,7 +314,9 @@ def debug(chain_file: str, port: int):
         lctl debug chain.lctl.json
         lctl debug --port 3000 chain.lctl.json
     """
-    chain = Chain.load(Path(chain_file))
+    chain = _load_chain_safely(chain_file)
+    if chain is None:
+        sys.exit(1)
 
     click.echo(f"Starting LCTL Visual Debugger...")
     click.echo(f"  Chain: {chain.id}")
@@ -281,7 +330,7 @@ def debug(chain_file: str, port: int):
     click.echo("  lctl stats  - Performance metrics")
 
 
-def _print_event(event):
+def _print_event(event: Event) -> None:
     """Print a single event."""
     type_colors = {
         "step_start": "cyan",
@@ -293,23 +342,40 @@ def _print_event(event):
         "checkpoint": "magenta"
     }
 
-    etype = event.type.value if hasattr(event.type, 'value') else event.type
+    etype = event.type.value if hasattr(event.type, 'value') else str(event.type)
     color = type_colors.get(etype, "white")
 
     click.echo(f"[{event.seq}] " + click.style(etype, fg=color) + f" ({event.agent})")
 
-    # Show key data
+    # Show key data - handle None values safely
     if etype == "fact_added":
-        click.echo(f"     {event.data.get('id')}: {event.data.get('text', '')[:50]}...")
+        fact_id = event.data.get('id', 'unknown')
+        text = event.data.get('text', '') or ''
+        display_text = text[:50] + "..." if len(text) > 50 else text
+        click.echo(f"     {fact_id}: {display_text}")
     elif etype == "error":
-        click.echo(f"     {event.data.get('category')}/{event.data.get('type')}: {event.data.get('message', '')[:50]}")
+        category = event.data.get('category', 'unknown')
+        error_type = event.data.get('type', 'unknown')
+        message = event.data.get('message', '') or ''
+        display_msg = message[:50] + "..." if len(message) > 50 else message
+        click.echo(f"     {category}/{error_type}: {display_msg}")
     elif etype == "tool_call":
-        click.echo(f"     {event.data.get('tool')}: {event.data.get('duration_ms', 0)}ms")
+        tool = event.data.get('tool', 'unknown')
+        duration = event.data.get('duration_ms', 0) or 0
+        click.echo(f"     {tool}: {duration}ms")
 
 
 def _estimate_cost(tokens_in: int, tokens_out: int) -> float:
-    """Estimate cost based on typical Claude pricing."""
+    """Estimate cost based on typical Claude pricing.
+
+    Note: This is a rough estimate using Claude 3 Opus pricing.
+    Actual costs vary by model and pricing tier.
+    """
     # Rough estimate: $3/1M input, $15/1M output (Claude 3 Opus pricing)
+    # Handle None or negative values gracefully
+    tokens_in = max(0, tokens_in or 0)
+    tokens_out = max(0, tokens_out or 0)
+
     cost_in = (tokens_in / 1_000_000) * 3
     cost_out = (tokens_out / 1_000_000) * 15
     return cost_in + cost_out

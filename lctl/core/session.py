@@ -1,7 +1,7 @@
 """LCTL Session - Context manager for manual instrumentation."""
 
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -30,19 +30,24 @@ class LCTLSession:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
-            self.error(
-                category="execution_error",
-                error_type=exc_type.__name__,
-                message=str(exc_val),
-                recoverable=False
-            )
+            try:
+                self.error(
+                    category="execution_error",
+                    error_type=exc_type.__name__,
+                    message=str(exc_val),
+                    recoverable=False
+                )
+            except Exception:
+                # Don't suppress the original exception if error recording fails
+                pass
+        return False  # Never suppress exceptions
 
     def _next_seq(self) -> int:
         self._seq += 1
         return self._seq
 
     def _now(self) -> datetime:
-        return datetime.utcnow()
+        return datetime.now(timezone.utc)
 
     def _add_event(self, event_type: EventType, agent: str, data: Dict[str, Any]) -> Event:
         event = Event(
@@ -172,8 +177,24 @@ class LCTLSession:
         return event.seq
 
     def export(self, path: str) -> None:
-        """Export chain to file."""
-        self.chain.save(Path(path))
+        """Export chain to file.
+
+        Raises:
+            PermissionError: If write permission is denied.
+            OSError: If the file cannot be written.
+        """
+        export_path = Path(path)
+
+        # Check if parent directory exists
+        if not export_path.parent.exists():
+            raise FileNotFoundError(f"Directory does not exist: {export_path.parent}")
+
+        try:
+            self.chain.save(export_path)
+        except PermissionError:
+            raise PermissionError(f"Permission denied writing to: {path}")
+        except OSError as e:
+            raise OSError(f"Failed to export chain to {path}: {e}")
 
     def to_dict(self) -> Dict[str, Any]:
         """Export chain as dictionary."""
@@ -187,22 +208,36 @@ def traced_step(session: LCTLSession, agent: str, intent: str, input_summary: st
     Usage:
         with traced_step(session, "analyzer", "analyze", "code.py"):
             result = do_analysis()
+
+    Note: If tracing itself fails, the original exception is still raised.
     """
     import time
     start = time.time()
-    session.step_start(agent, intent, input_summary)
+
+    try:
+        session.step_start(agent, intent, input_summary)
+    except Exception:
+        # If we can't even start tracing, just execute without tracing
+        yield
+        return
 
     try:
         yield
         duration_ms = int((time.time() - start) * 1000)
-        session.step_end(agent, outcome="success", duration_ms=duration_ms)
+        try:
+            session.step_end(agent, outcome="success", duration_ms=duration_ms)
+        except Exception:
+            pass  # Don't fail if we can't record the end
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        session.step_end(agent, outcome="error", duration_ms=duration_ms)
-        session.error(
-            category="execution_error",
-            error_type=type(e).__name__,
-            message=str(e),
-            recoverable=False
-        )
+        try:
+            session.step_end(agent, outcome="error", duration_ms=duration_ms)
+            session.error(
+                category="execution_error",
+                error_type=type(e).__name__,
+                message=str(e),
+                recoverable=False
+            )
+        except Exception:
+            pass  # Don't suppress original exception if tracing fails
         raise
