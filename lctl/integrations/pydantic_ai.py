@@ -292,23 +292,31 @@ class TracedStreamedRunResult:
         self._tracer = tracer
         self._agent_name = agent_name
         self._accumulated_content = ""
+        self._stream_id = f"stream-{id(result)}"
+        self._chunk_index = 0
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._result, name)
 
     async def stream_text(self, *args, **kwargs) -> AsyncIterator[str]:
-        """Trace stream_text iteration."""
+        """Trace stream_text iteration with chunk-level events."""
         # Record stream start
-        # Note: LCTL doesn't have explicit STREAM_START event yet in session public API?
-        # It's an internal event type.
-        # We'll rely on the start of the step having been recorded in run_stream.
-        
+        self._tracer.session.stream_start(
+            stream_id=self._stream_id,
+            description=f"Streaming response from {self._agent_name}"
+        )
+
         async for chunk in self._result.stream_text(*args, **kwargs):
             self._accumulated_content += chunk
-            # TODO: Emit stream chunk event if LCTL supports it
-            # self._tracer.session.emit_stream_chunk(...)
+            # Emit stream chunk event
+            self._tracer.session.stream_chunk(
+                stream_id=self._stream_id,
+                content=chunk,
+                index=self._chunk_index
+            )
+            self._chunk_index += 1
             yield chunk
-        
+
         # Stream finished
         self._finalize_trace()
 
@@ -321,6 +329,14 @@ class TracedStreamedRunResult:
         except Exception:
             tokens_in = 0
             tokens_out = 0
+
+        # Record stream end
+        self._tracer.session.stream_end(
+            stream_id=self._stream_id,
+            total_content=self._accumulated_content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+        )
 
         self._tracer.session.step_end(
             outcome="success",

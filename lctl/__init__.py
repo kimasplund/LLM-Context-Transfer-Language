@@ -24,7 +24,7 @@ CLI:
     lctl diff v1.json v2.json        # Compare chains
 """
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
 
 from .core.events import Chain, Event, EventType, ReplayEngine, State
 from .core.session import LCTLSession, traced_step

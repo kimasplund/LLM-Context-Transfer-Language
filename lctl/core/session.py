@@ -270,6 +270,68 @@ class LCTLSession:
         })
         return event.seq
 
+    def stream_start(self, stream_id: str, description: str = "") -> int:
+        """Start a streaming response.
+
+        Args:
+            stream_id: Unique identifier for this stream
+            description: Optional description of what's being streamed
+
+        Returns:
+            Event sequence number
+        """
+        agent = self._current_agent or "unknown"
+        event = self._add_event(EventType.STREAM_START, agent, {
+            "stream_id": stream_id,
+            "description": description
+        })
+        return event.seq
+
+    def stream_chunk(self, stream_id: str, content: str, index: int = 0) -> int:
+        """Record a streaming chunk.
+
+        Args:
+            stream_id: Identifier of the stream this chunk belongs to
+            content: The chunk content
+            index: Optional chunk index for ordering
+
+        Returns:
+            Event sequence number
+        """
+        agent = self._current_agent or "unknown"
+        event = self._add_event(EventType.STREAM_CHUNK, agent, {
+            "stream_id": stream_id,
+            "content": content,
+            "index": index
+        })
+        return event.seq
+
+    def stream_end(
+        self,
+        stream_id: str,
+        total_content: str = "",
+        tokens_in: int = 0,
+        tokens_out: int = 0
+    ) -> int:
+        """End a streaming response.
+
+        Args:
+            stream_id: Identifier of the stream
+            total_content: Complete accumulated content
+            tokens_in: Input tokens used
+            tokens_out: Output tokens generated
+
+        Returns:
+            Event sequence number
+        """
+        agent = self._current_agent or "unknown"
+        event = self._add_event(EventType.STREAM_END, agent, {
+            "stream_id": stream_id,
+            "total_content": total_content,
+            "tokens": {"input": tokens_in, "output": tokens_out}
+        })
+        return event.seq
+
     def export(self, path: str) -> None:
         """Export chain to file.
 

@@ -991,8 +991,19 @@ def generate_hooks(output_dir: str = ".claude/hooks", chain_id: Optional[str] = 
 # LCTL Tracing Hook - Pre Tool Use
 # Records Task tool invocations as STEP_START events
 
+# Find working Python (prefer venv, fallback to system)
+if [ -f ".venv/bin/python3" ]; then
+    PYTHON=".venv/bin/python3"
+elif [ -f "venv/bin/python3" ]; then
+    PYTHON="venv/bin/python3"
+elif command -v /usr/bin/python3 &> /dev/null; then
+    PYTHON="/usr/bin/python3"
+else
+    PYTHON="python3"
+fi
+
 if [ "$CLAUDE_TOOL_NAME" = "Task" ]; then
-    python3 -c "
+    $PYTHON -c "
 import os
 import sys
 sys.path.insert(0, '.')
@@ -1024,9 +1035,20 @@ fi
 # LCTL Tracing Hook - Post Tool Use
 # Records tool completions including Task, TodoWrite, Skill, MCP tools, and Git
 
+# Find working Python (prefer venv, fallback to system)
+if [ -f ".venv/bin/python3" ]; then
+    PYTHON=".venv/bin/python3"
+elif [ -f "venv/bin/python3" ]; then
+    PYTHON="venv/bin/python3"
+elif command -v /usr/bin/python3 &> /dev/null; then
+    PYTHON="/usr/bin/python3"
+else
+    PYTHON="python3"
+fi
+
 TOOL="$CLAUDE_TOOL_NAME"
 
-python3 -c "
+$PYTHON -c "
 import os
 import sys
 import json
@@ -1161,7 +1183,18 @@ except Exception as e:
 # LCTL Tracing Hook - Stop
 # Exports final trace when Claude Code session ends
 
-python3 -c "
+# Find working Python (prefer venv, fallback to system)
+if [ -f ".venv/bin/python3" ]; then
+    PYTHON=".venv/bin/python3"
+elif [ -f "venv/bin/python3" ]; then
+    PYTHON="venv/bin/python3"
+elif command -v /usr/bin/python3 &> /dev/null; then
+    PYTHON="/usr/bin/python3"
+else
+    PYTHON="python3"
+fi
+
+$PYTHON -c "
 import sys
 sys.path.insert(0, '.')
 
