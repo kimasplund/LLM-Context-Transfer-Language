@@ -971,11 +971,12 @@ class LCTLClaudeCodeTracer:
         _tracer_instance = None
 
 
-def generate_hooks(output_dir: str = ".claude/hooks") -> Dict[str, str]:
+def generate_hooks(output_dir: str = ".claude/hooks", chain_id: Optional[str] = None) -> Dict[str, str]:
     """Generate Claude Code hook scripts for LCTL tracing.
 
     Args:
         output_dir: Directory to write hook scripts
+        chain_id: Optional chain ID for the tracing session
 
     Returns:
         Dict mapping hook name to file path
@@ -1189,6 +1190,36 @@ except Exception as e:
     stop_hook_path.write_text(stop_hook)
     stop_hook_path.chmod(0o755)
     hooks["Stop"] = str(stop_hook_path)
+
+    # Initialize state file with chain_id if provided
+    if chain_id:
+        traces_dir = Path(".claude/traces")
+        traces_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create initial chain file
+        chain_path = traces_dir / f"{chain_id}.lctl.json"
+        initial_chain = {
+            "lctl": "4.0",
+            "chain": {"id": chain_id},
+            "events": []
+        }
+        with open(chain_path, "w") as f:
+            json.dump(initial_chain, f, indent=2)
+
+        # Create state file pointing to this chain
+        state_path = traces_dir / ".lctl-state.json"
+        state = {
+            "chain_path": str(chain_path),
+            "agent_stack": [],
+            "tool_counts": {},
+            "start_times": {},
+            "background_tasks": {},
+            "agent_ids": {},
+            "parallel_group": None,
+            "file_changes": [],
+        }
+        with open(state_path, "w") as f:
+            json.dump(state, f)
 
     return hooks
 

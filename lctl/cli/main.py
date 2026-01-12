@@ -821,7 +821,8 @@ def claude():
 @claude.command("init")
 @click.option("--hooks-dir", "-d", default=".claude/hooks", help="Hooks directory")
 @click.option("--force", "-f", is_flag=True, help="Overwrite existing hooks")
-def claude_init(hooks_dir: str, force: bool):
+@click.option("--chain-id", "-c", default=None, help="Chain ID for tracing session")
+def claude_init(hooks_dir: str, force: bool, chain_id: str):
     """Initialize LCTL tracing for Claude Code.
 
     Generates hook scripts that automatically trace Task tool usage,
@@ -829,6 +830,7 @@ def claude_init(hooks_dir: str, force: bool):
 
     Example:
         lctl claude init
+        lctl claude init --chain-id my-project
         lctl claude init --hooks-dir /path/to/hooks
     """
     from ..integrations.claude_code import generate_hooks
@@ -847,13 +849,16 @@ def claude_init(hooks_dir: str, force: bool):
             sys.exit(1)
 
     try:
-        hooks = generate_hooks(hooks_dir)
+        hooks = generate_hooks(hooks_dir, chain_id=chain_id)
         click.echo(click.style("LCTL Claude Code tracing initialized!", fg="green"))
         click.echo()
         click.echo("Generated hooks:")
         for name, path in hooks.items():
             click.echo(f"  {name}: {path}")
         click.echo()
+        if chain_id:
+            click.echo(f"Tracing session: {chain_id}")
+            click.echo()
         click.echo("Tracing will automatically capture:")
         click.echo("  - Task tool invocations (agent spawning)")
         click.echo("  - Agent completions with results")
