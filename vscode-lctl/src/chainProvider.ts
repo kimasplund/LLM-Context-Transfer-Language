@@ -15,7 +15,7 @@ export interface LctlEvent {
     type: string;
     timestamp: string;
     agent?: string;
-    data?: Record<string, any>;
+    data?: Record<string, unknown>;
 }
 
 // Computed statistics for a chain
@@ -222,7 +222,7 @@ export class ChainTreeProvider implements vscode.TreeDataProvider<ChainTreeItem>
             this._onDidChangeTreeData.fire();
         });
 
-        this.fileWatcher.onDidCreate(uri => {
+        this.fileWatcher.onDidCreate(_uri => {
             this._onDidChangeTreeData.fire();
         });
 
@@ -308,7 +308,7 @@ export class ChainTreeProvider implements vscode.TreeDataProvider<ChainTreeItem>
         return [];
     }
 
-    getParent(element: ChainTreeItem): ChainTreeItem | undefined {
+    getParent(_element: ChainTreeItem): ChainTreeItem | undefined {
         // Required for reveal() functionality
         return undefined;
     }
@@ -339,8 +339,8 @@ export class ChainTreeProvider implements vscode.TreeDataProvider<ChainTreeItem>
 
         // Sort: recording first, then by event count descending
         return items.sort((a, b) => {
-            if (a.stats?.isRecording && !b.stats?.isRecording) return -1;
-            if (!a.stats?.isRecording && b.stats?.isRecording) return 1;
+            if (a.stats?.isRecording && !b.stats?.isRecording) {return -1;}
+            if (!a.stats?.isRecording && b.stats?.isRecording) {return 1;}
             return (b.stats?.eventCount || 0) - (a.stats?.eventCount || 0);
         });
     }
@@ -405,9 +405,9 @@ export class ChainTreeProvider implements vscode.TreeDataProvider<ChainTreeItem>
 
             // Accumulate metrics from step_end events
             if (event.type === 'step_end' && event.data) {
-                stats.totalDurationMs += event.data.duration_ms || 0;
-                stats.tokensIn += event.data.tokens_in || 0;
-                stats.tokensOut += event.data.tokens_out || 0;
+                stats.totalDurationMs += Number(event.data.duration_ms) || 0;
+                stats.tokensIn += Number(event.data.tokens_in) || 0;
+                stats.tokensOut += Number(event.data.tokens_out) || 0;
             }
         }
 

@@ -134,7 +134,7 @@ export class LctlDashboardPanel {
     }
 
     private async _loadAndDisplayChain(): Promise<void> {
-        if (!this._chainUri) return;
+        if (!this._chainUri) {return;}
 
         try {
             const content = await vscode.workspace.fs.readFile(this._chainUri);
@@ -248,7 +248,7 @@ export class LctlDashboardPanel {
             placeHolder: 'Select a chain to compare with'
         });
 
-        if (!selected) return;
+        if (!selected) {return;}
 
         // Load the comparison chain
         try {

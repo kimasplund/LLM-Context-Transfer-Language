@@ -241,7 +241,7 @@ export function registerCommands(
                     placeHolder: 'Select first chain to compare'
                 });
 
-                if (!selected) return;
+                if (!selected) {return;}
                 firstUri = selected.uri;
             }
 
@@ -257,7 +257,7 @@ export function registerCommands(
                 placeHolder: 'Select second chain to compare'
             });
 
-            if (!second) return;
+            if (!second) {return;}
 
             // Run diff command
             const terminalName = 'LCTL Diff';
@@ -287,12 +287,12 @@ function generateHtmlReport(chainData: LctlChainFile, filePath: string): string 
     const agents = new Set<string>();
 
     for (const event of events) {
-        if (event.agent) agents.add(event.agent);
-        if (event.type === 'error') errorCount++;
+        if (event.agent) {agents.add(event.agent);}
+        if (event.type === 'error') {errorCount++;}
         if (event.type === 'step_end' && event.data) {
-            totalDurationMs += event.data.duration_ms || 0;
-            tokensIn += event.data.tokens_in || 0;
-            tokensOut += event.data.tokens_out || 0;
+            totalDurationMs += Number(event.data.duration_ms) || 0;
+            tokensIn += Number(event.data.tokens_in) || 0;
+            tokensOut += Number(event.data.tokens_out) || 0;
         }
     }
 
@@ -435,38 +435,38 @@ function getEventIcon(type: string): string {
     return icons[type] || '•';
 }
 
-function formatEventDetails(event: any): string {
-    if (!event.data) return '-';
+function formatEventDetails(event: LctlEvent): string {
+    if (!event.data) {return '-';}
 
     const data = event.data;
     const lines: string[] = [];
 
     if (event.type === 'step_start') {
-        if (data.intent) lines.push(`Intent: ${data.intent}`);
-        if (data.input_summary) lines.push(`Input: ${truncate(data.input_summary, 100)}`);
+        if (data.intent) {lines.push(`Intent: ${data.intent}`);}
+        if (data.input_summary) {lines.push(`Input: ${truncate(String(data.input_summary), 100)}`);}
     } else if (event.type === 'step_end') {
-        if (data.outcome) lines.push(`Outcome: ${data.outcome}`);
-        if (data.duration_ms) lines.push(`Duration: ${data.duration_ms}ms`);
+        if (data.outcome) {lines.push(`Outcome: ${data.outcome}`);}
+        if (data.duration_ms) {lines.push(`Duration: ${data.duration_ms}ms`);}
         if (data.tokens_in || data.tokens_out) {
             lines.push(`Tokens: ${data.tokens_in || 0} in / ${data.tokens_out || 0} out`);
         }
     } else if (event.type === 'tool_call') {
-        if (data.tool) lines.push(`Tool: ${data.tool}`);
-        if (data.duration_ms) lines.push(`Duration: ${data.duration_ms}ms`);
+        if (data.tool) {lines.push(`Tool: ${data.tool}`);}
+        if (data.duration_ms) {lines.push(`Duration: ${data.duration_ms}ms`);}
     } else if (event.type === 'fact_added' || event.type === 'fact_modified') {
-        if (data.id) lines.push(`Fact: ${data.id}`);
-        if (data.text) lines.push(`Text: ${truncate(data.text, 100)}`);
-        if (data.confidence !== undefined) lines.push(`Confidence: ${(data.confidence * 100).toFixed(0)}%`);
+        if (data.id) {lines.push(`Fact: ${data.id}`);}
+        if (data.text) {lines.push(`Text: ${truncate(String(data.text), 100)}`);}
+        if (data.confidence !== undefined && data.confidence !== null) {lines.push(`Confidence: ${(Number(data.confidence) * 100).toFixed(0)}%`);}
     } else if (event.type === 'error') {
-        if (data.error_type) lines.push(`Type: ${data.error_type}`);
-        if (data.message) lines.push(`Message: ${truncate(data.message, 100)}`);
+        if (data.error_type) {lines.push(`Type: ${data.error_type}`);}
+        if (data.message) {lines.push(`Message: ${truncate(String(data.message), 100)}`);}
     }
 
     return lines.join('\n') || JSON.stringify(data, null, 2).slice(0, 200);
 }
 
 function truncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text;
+    if (text.length <= maxLen) {return text;}
     return text.slice(0, maxLen - 3) + '...';
 }
 
@@ -486,15 +486,15 @@ function generateMarkdownReport(chainData: LctlChainFile, filePath: string): str
     const tools = new Set<string>();
 
     for (const event of events) {
-        if (event.agent) agents.add(event.agent);
-        if (event.type === 'error') errorCount++;
+        if (event.agent) {agents.add(event.agent);}
+        if (event.type === 'error') {errorCount++;}
         if (event.type === 'tool_call' && event.data?.tool) {
-            tools.add(event.data.tool);
+            tools.add(String(event.data.tool));
         }
         if (event.type === 'step_end' && event.data) {
-            totalDurationMs += event.data.duration_ms || 0;
-            tokensIn += event.data.tokens_in || 0;
-            tokensOut += event.data.tokens_out || 0;
+            totalDurationMs += Number(event.data.duration_ms) || 0;
+            tokensIn += Number(event.data.tokens_in) || 0;
+            tokensOut += Number(event.data.tokens_out) || 0;
         }
     }
 
@@ -576,30 +576,30 @@ function generateMarkdownReport(chainData: LctlChainFile, filePath: string): str
 
 function formatMarkdownEventDetails(event: LctlEvent): string {
     const data = event.data;
-    if (!data) return '';
+    if (!data) {return '';}
 
     const lines: string[] = [];
 
     if (event.type === 'step_start') {
-        if (data.intent) lines.push(`- **Intent**: ${data.intent}`);
-        if (data.input_summary) lines.push(`- **Input**: ${truncate(data.input_summary as string, 150)}`);
+        if (data.intent) {lines.push(`- **Intent**: ${data.intent}`);}
+        if (data.input_summary) {lines.push(`- **Input**: ${truncate(data.input_summary as string, 150)}`);}
     } else if (event.type === 'step_end') {
-        if (data.outcome) lines.push(`- **Outcome**: ${data.outcome}`);
-        if (data.duration_ms) lines.push(`- **Duration**: ${data.duration_ms}ms`);
+        if (data.outcome) {lines.push(`- **Outcome**: ${data.outcome}`);}
+        if (data.duration_ms) {lines.push(`- **Duration**: ${data.duration_ms}ms`);}
         if (data.tokens_in || data.tokens_out) {
             lines.push(`- **Tokens**: ${data.tokens_in || 0} in / ${data.tokens_out || 0} out`);
         }
-        if (data.output_summary) lines.push(`- **Output**: ${truncate(data.output_summary as string, 150)}`);
+        if (data.output_summary) {lines.push(`- **Output**: ${truncate(data.output_summary as string, 150)}`);}
     } else if (event.type === 'tool_call') {
-        if (data.tool) lines.push(`- **Tool**: \`${data.tool}\``);
-        if (data.duration_ms) lines.push(`- **Duration**: ${data.duration_ms}ms`);
+        if (data.tool) {lines.push(`- **Tool**: \`${data.tool}\``);}
+        if (data.duration_ms) {lines.push(`- **Duration**: ${data.duration_ms}ms`);}
     } else if (event.type === 'fact_added' || event.type === 'fact_modified') {
-        if (data.id) lines.push(`- **Fact ID**: ${data.id}`);
-        if (data.confidence !== undefined) lines.push(`- **Confidence**: ${((data.confidence as number) * 100).toFixed(0)}%`);
-        if (data.text) lines.push(`- **Text**: ${truncate(data.text as string, 150)}`);
+        if (data.id) {lines.push(`- **Fact ID**: ${data.id}`);}
+        if (data.confidence !== undefined) {lines.push(`- **Confidence**: ${((data.confidence as number) * 100).toFixed(0)}%`);}
+        if (data.text) {lines.push(`- **Text**: ${truncate(data.text as string, 150)}`);}
     } else if (event.type === 'error') {
-        if (data.error_type) lines.push(`- **Error Type**: ${data.error_type}`);
-        if (data.message) lines.push(`- **Message**: ${truncate(data.message as string, 150)}`);
+        if (data.error_type) {lines.push(`- **Error Type**: ${data.error_type}`);}
+        if (data.message) {lines.push(`- **Message**: ${truncate(data.message as string, 150)}`);}
     }
 
     return lines.join('\n');
