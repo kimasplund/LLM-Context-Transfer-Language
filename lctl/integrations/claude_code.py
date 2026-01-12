@@ -1096,11 +1096,12 @@ try:
         if 'git commit' in cmd and 'Successfully' not in result:
             # Try to extract commit info from result
             import re
+            # Use \\x27 for single quotes to avoid bash escaping issues
             commit_match = re.search(r'\\[\\w+\\s+([a-f0-9]+)\\]', result)
             if commit_match:
                 commit_hash = commit_match.group(1)
-                # Extract message from command
-                msg_match = re.search(r'-m\\s+[\"\\']([^\"\\']+)[\"\\']', cmd)
+                # Extract message from command (use hex escapes for quotes)
+                msg_match = re.search(r'-m\\s+[\\x22\\x27]([^\\x22\\x27]+)[\\x22\\x27]', cmd)
                 message = msg_match.group(1) if msg_match else 'Commit'
                 # Extract stats
                 stats_match = re.search(r'(\\d+)\\s+file.*?(\\d+)\\s+insertion.*?(\\d+)\\s+deletion', result)

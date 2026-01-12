@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import { LctlChainFile } from './chainProvider';
 
 export class LctlDashboardPanel {
     public static currentPanel: LctlDashboardPanel | undefined;
@@ -7,7 +10,11 @@ export class LctlDashboardPanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _chainUri: vscode.Uri | undefined;
+    private _chainData: LctlChainFile | undefined;
     private _disposables: vscode.Disposable[] = [];
+    private _fileWatcher: vscode.FileSystemWatcher | undefined;
+    private _stateWatcher: vscode.FileSystemWatcher | undefined;
+    private _isRecording: boolean = false;
 
     public static createOrShow(extensionUri: vscode.Uri, chainUri?: vscode.Uri): void {
         const column = vscode.window.activeTextEditor
@@ -30,8 +37,8 @@ export class LctlDashboardPanel {
                 enableScripts: true,
                 retainContextWhenHidden: true,
                 localResourceRoots: [
-                    vscode.Uri.joinPath(extensionUri, 'media'),
-                    vscode.Uri.joinPath(extensionUri, 'out')
+                    vscode.Uri.joinPath(extensionUri, 'out', 'webview'),
+                    vscode.Uri.joinPath(extensionUri, 'media')
                 ]
             }
         );
@@ -50,9 +57,9 @@ export class LctlDashboardPanel {
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
-        this._chainUri = chainUri;
 
         this._update();
+        this._setupStateWatcher();
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
@@ -71,19 +78,87 @@ export class LctlDashboardPanel {
             null,
             this._disposables
         );
+
+        if (chainUri) {
+            this.loadChain(chainUri);
+        }
     }
 
-    public loadChain(uri: vscode.Uri): void {
+    public async loadChain(uri: vscode.Uri): Promise<void> {
         this._chainUri = uri;
-        this._panel.webview.postMessage({
-            type: 'loadChain',
-            uri: uri.fsPath
+        this._setupFileWatcher(uri);
+        await this._loadAndDisplayChain();
+    }
+
+    private _setupFileWatcher(uri: vscode.Uri): void {
+        this._fileWatcher?.dispose();
+
+        const pattern = new vscode.RelativePattern(
+            vscode.Uri.joinPath(uri, '..'),
+            '*.lctl.json'
+        );
+        this._fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+
+        this._fileWatcher.onDidChange(changedUri => {
+            if (changedUri.fsPath === uri.fsPath) {
+                this._loadAndDisplayChain();
+            }
         });
+
+        this._disposables.push(this._fileWatcher);
+    }
+
+    private _setupStateWatcher(): void {
+        this._stateWatcher = vscode.workspace.createFileSystemWatcher('**/.lctl-state.json');
+
+        const checkRecording = async () => {
+            try {
+                const stateFiles = await vscode.workspace.findFiles('**/.lctl-state.json', '**/node_modules/**', 1);
+                this._isRecording = stateFiles.length > 0;
+                this._panel.webview.postMessage({
+                    type: 'recordingUpdate',
+                    isRecording: this._isRecording
+                });
+            } catch {
+                this._isRecording = false;
+            }
+        };
+
+        this._stateWatcher.onDidCreate(checkRecording);
+        this._stateWatcher.onDidDelete(checkRecording);
+        this._stateWatcher.onDidChange(checkRecording);
+        this._disposables.push(this._stateWatcher);
+
+        // Initial check
+        checkRecording();
+    }
+
+    private async _loadAndDisplayChain(): Promise<void> {
+        if (!this._chainUri) return;
+
+        try {
+            const content = await vscode.workspace.fs.readFile(this._chainUri);
+            this._chainData = JSON.parse(Buffer.from(content).toString('utf8'));
+
+            this._panel.webview.postMessage({
+                type: 'chainData',
+                data: this._chainData,
+                path: this._chainUri.fsPath,
+                isRecording: this._isRecording
+            });
+        } catch (err) {
+            this._panel.webview.postMessage({
+                type: 'error',
+                message: `Failed to load chain: ${err}`
+            });
+        }
     }
 
     public dispose(): void {
         LctlDashboardPanel.currentPanel = undefined;
 
+        this._fileWatcher?.dispose();
+        this._stateWatcher?.dispose();
         this._panel.dispose();
 
         while (this._disposables.length) {
@@ -103,29 +178,141 @@ export class LctlDashboardPanel {
         switch (message.type) {
             case 'ready':
                 if (this._chainUri) {
-                    this.loadChain(this._chainUri);
+                    await this._loadAndDisplayChain();
                 }
                 break;
+
             case 'openFile':
                 if (message.path) {
                     const uri = vscode.Uri.file(message.path);
-                    await vscode.window.showTextDocument(uri);
+                    const doc = await vscode.workspace.openTextDocument(uri);
+                    const line = message.line ? message.line - 1 : 0;
+                    await vscode.window.showTextDocument(doc, {
+                        selection: new vscode.Range(line, 0, line, 0)
+                    });
                 }
                 break;
+
             case 'replay':
-                if (message.chainId) {
-                    await vscode.commands.executeCommand('lctl.replay', message.chainId);
+                if (this._chainUri) {
+                    await vscode.commands.executeCommand('lctl.replay', this._chainUri);
                 }
                 break;
-            case 'showMessage':
-                if (message.text) {
-                    void vscode.window.showInformationMessage(message.text);
+
+            case 'exportHtml':
+                if (this._chainUri) {
+                    await vscode.commands.executeCommand('lctl.exportHtml', this._chainUri);
                 }
+                break;
+
+            case 'showStats':
+                if (this._chainUri) {
+                    await vscode.commands.executeCommand('lctl.showStats', this._chainUri);
+                }
+                break;
+
+            case 'requestData':
+                if (this._chainUri) {
+                    await this._loadAndDisplayChain();
+                }
+                break;
+
+            case 'requestCompare':
+                await this._handleCompareRequest();
                 break;
         }
     }
 
+    private async _handleCompareRequest(): Promise<void> {
+        // Get all chain files
+        const files = await vscode.workspace.findFiles('**/*.lctl.json', '**/node_modules/**');
+
+        if (files.length < 2) {
+            void vscode.window.showWarningMessage('Need at least 2 chain files to compare.');
+            return;
+        }
+
+        // Filter out current chain
+        const otherFiles = this._chainUri
+            ? files.filter(f => f.fsPath !== this._chainUri!.fsPath)
+            : files;
+
+        // Let user pick
+        const items = otherFiles.map((file) => ({
+            label: path.basename(file.fsPath, '.lctl.json'),
+            description: vscode.workspace.asRelativePath(file),
+            uri: file
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select a chain to compare with'
+        });
+
+        if (!selected) return;
+
+        // Load the comparison chain
+        try {
+            const content = await vscode.workspace.fs.readFile(selected.uri);
+            const data = JSON.parse(Buffer.from(content).toString('utf8'));
+
+            this._panel.webview.postMessage({
+                type: 'compareChainData',
+                data,
+                path: selected.uri.fsPath
+            });
+        } catch (err) {
+            void vscode.window.showErrorMessage(`Failed to load comparison chain: ${err}`);
+        }
+    }
+
     private _getHtmlForWebview(): string {
+        const webview = this._panel.webview;
+        const webviewPath = vscode.Uri.joinPath(this._extensionUri, 'out', 'webview');
+
+        // Check if React build exists
+        const indexPath = path.join(webviewPath.fsPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+            return this._getReactWebviewHtml(webview, webviewPath);
+        }
+
+        // Fallback to inline HTML if React build doesn't exist
+        return this._getFallbackHtml();
+    }
+
+    private _getReactWebviewHtml(webview: vscode.Webview, webviewPath: vscode.Uri): string {
+        // Read the built index.html
+        const indexPath = path.join(webviewPath.fsPath, 'index.html');
+        let html = fs.readFileSync(indexPath, 'utf8');
+
+        // Get URIs for assets
+        const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(webviewPath, 'assets', 'index.js'));
+        const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(webviewPath, 'assets', 'style.css'));
+
+        // Generate nonce for CSP
+        const nonce = getNonce();
+
+        // Update CSP and asset paths
+        html = html
+            // Update CSP to allow our scripts and styles
+            .replace(
+                /<meta http-equiv="Content-Security-Policy"[^>]*>/,
+                `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource} data:;">`
+            )
+            // Replace script tag (Vite adds crossorigin attribute)
+            .replace(
+                /<script type="module"[^>]*src="[^"]*"[^>]*><\/script>/,
+                `<script type="module" nonce="${nonce}" src="${scriptUri}"></script>`
+            )
+            // Replace stylesheet link (Vite adds crossorigin attribute)
+            .replace(
+                /<link rel="stylesheet"[^>]*href="[^"]*"[^>]*>/,
+                `<link rel="stylesheet" href="${styleUri}">`
+            );
+
+        return html;
+    }
+
+    private _getFallbackHtml(): string {
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -136,347 +323,53 @@ export class LctlDashboardPanel {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LCTL Dashboard</title>
     <style>
-        :root {
-            --container-padding: 20px;
-            --input-padding-vertical: 6px;
-            --input-padding-horizontal: 10px;
-        }
         body {
-            padding: var(--container-padding);
-            color: var(--vscode-foreground);
-            font-size: var(--vscode-font-size);
-            font-weight: var(--vscode-font-weight);
             font-family: var(--vscode-font-family);
-            background-color: var(--vscode-editor-background);
-        }
-        .header {
+            background: var(--vscode-editor-background);
+            color: var(--vscode-foreground);
+            padding: 20px;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 24px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid var(--vscode-widget-border);
+            justify-content: center;
+            min-height: 80vh;
         }
-        .header h1 {
-            margin: 0;
-            font-size: 1.5em;
-            font-weight: 600;
-        }
-        .version-badge {
-            background: var(--vscode-badge-background);
-            color: var(--vscode-badge-foreground);
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.8em;
-        }
-        .chain-info {
-            background: var(--vscode-editor-inactiveSelectionBackground);
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }
-        .chain-info h2 {
-            margin: 0 0 12px 0;
-            font-size: 1.1em;
-        }
-        .info-grid {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 8px 16px;
-        }
-        .info-label {
-            color: var(--vscode-descriptionForeground);
-        }
-        .info-value {
-            font-family: var(--vscode-editor-font-family);
-        }
-        .actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 20px;
-        }
-        button {
-            border: none;
-            padding: var(--input-padding-vertical) var(--input-padding-horizontal);
+        .message {
             text-align: center;
-            outline: 1px solid transparent;
-            outline-offset: 2px;
-            color: var(--vscode-button-foreground);
-            background: var(--vscode-button-background);
+            max-width: 400px;
+        }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h2 { margin-bottom: 8px; }
+        p { opacity: 0.7; margin-bottom: 16px; }
+        .code {
+            background: var(--vscode-textCodeBlock-background);
+            padding: 8px 12px;
             border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background: var(--vscode-button-hoverBackground);
-        }
-        button:focus {
-            outline-color: var(--vscode-focusBorder);
-        }
-        button.secondary {
-            color: var(--vscode-button-secondaryForeground);
-            background: var(--vscode-button-secondaryBackground);
-        }
-        button.secondary:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-        }
-        .empty-state {
-            text-align: center;
-            padding: 48px 24px;
-            color: var(--vscode-descriptionForeground);
-        }
-        .empty-state h2 {
-            margin-bottom: 8px;
-        }
-        .timeline {
-            margin-top: 24px;
-        }
-        .events-section {
-            margin-top: 24px;
-            padding-top: 16px;
-            border-top: 1px solid var(--vscode-widget-border);
-        }
-        .event-item {
-            margin-bottom: 12px;
             font-family: var(--vscode-editor-font-family);
-            font-size: 0.9em;
-            border-left: 2px solid var(--vscode-widget-border);
-            padding-left: 12px;
-        }
-        .event-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 4px;
-            color: var(--vscode-descriptionForeground);
-            font-size: 0.85em;
-        }
-        .event-type {
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        .event-details {
-            padding: 4px 0;
-            white-space: pre-wrap;
-        }
-        .timeline h2 {
-            margin-bottom: 16px;
-        }
-        .timeline-item {
-            display: flex;
-            gap: 12px;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--vscode-widget-border);
-        }
-        .timeline-marker {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: var(--vscode-button-background);
-            margin-top: 4px;
-        }
-        .timeline-content {
-            flex: 1;
-        }
-        .timeline-title {
-            font-weight: 500;
-        }
-        .timeline-time {
-            font-size: 0.85em;
-            color: var(--vscode-descriptionForeground);
+            font-size: 12px;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>LCTL Time-Travel Debugger</h1>
-        <span class="version-badge">v4.0</span>
+    <div class="message">
+        <div class="icon">🔧</div>
+        <h2>React Dashboard Not Built</h2>
+        <p>The React webview hasn't been built yet. Run the following command in the webview-ui directory:</p>
+        <div class="code">npm run build</div>
     </div>
-
-    <div id="empty-state" class="empty-state">
-        <h2>No Chain Loaded</h2>
-        <p>Select a chain from the LCTL Explorer to view its details.</p>
-    </div>
-
-    <div id="chain-content" style="display: none;">
-        <div class="chain-info">
-            <h2>Chain Information</h2>
-            <div class="info-grid">
-                <span class="info-label">Chain ID:</span>
-                <span class="info-value" id="chain-id">-</span>
-                <span class="info-label">Version:</span>
-                <span class="info-value" id="chain-version">-</span>
-                <span class="info-label">Created:</span>
-                <span class="info-value" id="chain-created">-</span>
-                <span class="info-label">File:</span>
-                <span class="info-value" id="chain-file">-</span>
-            </div>
-            <div class="actions">
-                <button id="btn-replay">Replay Chain</button>
-                <button id="btn-open" class="secondary">Open File</button>
-            </div>
-        </div>
-
-        <div class="timeline" id="timeline">
-            <h2>Snapshots</h2>
-            <div id="timeline-items"></div>
-        </div>
-
-        <div class="events-section">
-            <h2>Detailed Events</h2>
-            <div id="event-list-items"></div>
-        </div>
-    </div>
-
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
-        let currentChainPath = null;
-
-        function showEmptyState() {
-            document.getElementById('empty-state').style.display = 'block';
-            document.getElementById('chain-content').style.display = 'none';
-        }
-
-        function showChainContent() {
-            document.getElementById('empty-state').style.display = 'none';
-            document.getElementById('chain-content').style.display = 'block';
-        }
-
-        async function loadChainData(path) {
-            currentChainPath = path;
-            try {
-                const response = await fetch('vscode-resource:' + path);
-                const data = await response.json();
-                displayChain(data, path);
-            } catch (err) {
-                showEmptyState();
-            }
-        }
-
-        function displayChain(data, path) {
-            document.getElementById('chain-id').textContent = data.chain_id || '-';
-            document.getElementById('chain-version').textContent = data.version || '-';
-            document.getElementById('chain-created').textContent = data.created
-                ? new Date(data.created).toLocaleString()
-                : '-';
-            document.getElementById('chain-file').textContent = path.split('/').pop();
-
-            const timelineItems = document.getElementById('timeline-items');
-            timelineItems.innerHTML = '';
-
-            if (data.snapshots && data.snapshots.length > 0) {
-                data.snapshots.forEach(snapshot => {
-                    const item = document.createElement('div');
-                    item.className = 'timeline-item';
-                    item.innerHTML = \`
-                        <div class="timeline-marker"></div>
-                        <div class="timeline-content">
-                            <div class="timeline-title">\${snapshot.snapshot_id}</div>
-                            <div class="timeline-time">\${new Date(snapshot.timestamp).toLocaleString()}</div>
-                            \${snapshot.description ? \`<div>\${snapshot.description}</div>\` : ''}
-                        </div>
-                    \`;
-                    timelineItems.appendChild(item);
-                });
-            } else {
-                timelineItems.innerHTML = '<p style="color: var(--vscode-descriptionForeground);">No snapshots in this chain.</p>';
-            }
-
-            // Display Events
-            displayEvents(data.events);
-
-            showChainContent();
-        }
-
-        function getEventIcon(type) {
-             const icons = {
-                 'step_start': '▶',
-                 'step_end': '■',
-                 'tool_call': '🔧',
-                 'llm_trace': '🧠',
-                 'error': '❌'
-             };
-             return icons[type] || '•';
-        }
-
-        function displayEvents(events) {
-            const eventList = document.getElementById('event-list-items');
-            eventList.innerHTML = '';
-
-            if (events && events.length > 0) {
-                events.forEach(event => {
-                    const item = document.createElement('div');
-                    item.className = 'event-item ' + (event.type || 'unknown');
-                    
-                    let content = '';
-                    if (event.type === 'llm_trace') {
-                        content = \`<div class="event-details">
-                            <strong>Model:</strong> \${event.model}<br>
-                            <strong>Tokens:</strong> In: \${event.usage?.input || 0}, Out: \${event.usage?.output || 0}
-                        </div>\`;
-                    } else if (event.type === 'tool_call') {
-                         content = \`<div class="event-details">
-                            <strong>Tool:</strong> \${event.tool}<br>
-                            Input: \${(event.input_data || '').slice(0, 100)}...
-                        </div>\`;
-                    } else if (event.type === 'step_start') {
-                        content = \`<div class="event-details">
-                            <strong>Agent:</strong> \${event.agent}<br>
-                            Intent: \${event.intent}
-                        </div>\`;
-                    } else if (event.type === 'error') {
-                        content = \`<div class="event-details" style="color: var(--vscode-errorForeground);">
-                            \${event.message || 'Unknown Error'}
-                        </div>\`;
-                    }
-
-                    item.innerHTML = \`
-                        <div class="event-marker">\${getEventIcon(event.type)}</div>
-                        <div class="event-content">
-                            <div class="event-header">
-                                <span class="event-type">\${event.type}</span>
-                                <span class="event-time">\${new Date(event.timestamp).toLocaleTimeString()}</span>
-                            </div>
-                            \${content}
-                        </div>
-                    \`;
-                    eventList.appendChild(item);
-                });
-            } else {
-                eventList.innerHTML = '<p style="color: var(--vscode-descriptionForeground);">No detailed events found.</p>';
-            }
-        }
-
-        document.getElementById('btn-replay').addEventListener('click', () => {
-            const chainId = document.getElementById('chain-id').textContent;
-            vscode.postMessage({ type: 'replay', chainId });
-        });
-
-        document.getElementById('btn-open').addEventListener('click', () => {
-            if (currentChainPath) {
-                vscode.postMessage({ type: 'openFile', path: currentChainPath });
-            }
-        });
-
-        window.addEventListener('message', event => {
-            const message = event.data;
-            switch (message.type) {
-                case 'loadChain':
-                    loadChainData(message.uri);
-                    break;
-            }
-        });
-
         vscode.postMessage({ type: 'ready' });
     </script>
-    </body>
-    </html>`;
+</body>
+</html>`;
     }
 }
 
 interface WebviewMessage {
-    type: 'ready' | 'openFile' | 'replay' | 'showMessage';
+    type: 'ready' | 'openFile' | 'replay' | 'exportHtml' | 'showStats' | 'requestData' | 'requestCompare';
     path?: string;
-    chainId?: string;
-    text?: string;
+    line?: number;
 }
 
 function getNonce(): string {

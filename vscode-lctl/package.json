@@ -2,7 +2,7 @@
   "name": "lctl-debugger",
   "displayName": "LCTL Time-Travel Debugger",
   "description": "Debug and visualize LCTL v4.0 context chains with time-travel capabilities",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "lctl",
   "engines": {
     "vscode": "^1.85.0"
@@ -40,6 +40,36 @@
         "title": "Replay Chain",
         "category": "LCTL",
         "icon": "$(debug-start)"
+      },
+      {
+        "command": "lctl.refresh",
+        "title": "Refresh LCTL Explorer",
+        "category": "LCTL",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "lctl.exportHtml",
+        "title": "Export HTML Report",
+        "category": "LCTL",
+        "icon": "$(export)"
+      },
+      {
+        "command": "lctl.compareChains",
+        "title": "Compare Chains",
+        "category": "LCTL",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "lctl.showStats",
+        "title": "Show Statistics",
+        "category": "LCTL",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "lctl.exportMarkdown",
+        "title": "Export Markdown Report",
+        "category": "LCTL",
+        "icon": "$(markdown)"
       }
     ],
     "views": {
@@ -55,7 +85,7 @@
     "viewsWelcome": [
       {
         "view": "lctlExplorer",
-        "contents": "No LCTL chains found in this workspace.\n[Create New Chain](command:lctl.openDashboard)"
+        "contents": "No LCTL chains found in this workspace.\n\nTo start tracing Claude Code sessions:\n```\nlctl claude init --chain-id my-project\n```\n\n[Open Dashboard](command:lctl.openDashboard)\n[Refresh](command:lctl.refresh)"
       }
     ],
     "menus": {
@@ -63,30 +93,79 @@
         {
           "command": "lctl.openDashboard",
           "when": "view == lctlExplorer",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "lctl.refresh",
+          "when": "view == lctlExplorer",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
           "command": "lctl.loadChain",
           "when": "view == lctlExplorer && viewItem == chainFile",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
           "command": "lctl.replay",
           "when": "view == lctlExplorer && viewItem == chainFile",
-          "group": "inline"
+          "group": "inline@2"
+        },
+        {
+          "command": "lctl.exportHtml",
+          "when": "view == lctlExplorer && viewItem == chainFile",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "lctl.exportMarkdown",
+          "when": "view == lctlExplorer && viewItem == chainFile",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "lctl.showStats",
+          "when": "view == lctlExplorer && viewItem == chainFile",
+          "group": "1_actions@3"
+        },
+        {
+          "command": "lctl.compareChains",
+          "when": "view == lctlExplorer && viewItem == chainFile",
+          "group": "1_actions@4"
         }
       ]
+    },
+    "configuration": {
+      "title": "LCTL Debugger",
+      "properties": {
+        "lctl.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh the explorer when chain files change"
+        },
+        "lctl.maxEventsInTree": {
+          "type": "number",
+          "default": 50,
+          "description": "Maximum number of events to show in tree view"
+        },
+        "lctl.defaultPricing": {
+          "type": "string",
+          "default": "claude-sonnet-4",
+          "enum": ["claude-opus-4.5", "claude-sonnet-4", "claude-haiku-3", "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+          "description": "Default model for cost estimation"
+        }
+      }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && npm run build:webview",
     "compile": "tsc -p ./",
+    "build:webview": "cd webview-ui && npm run build",
     "watch": "tsc -watch -p ./",
+    "watch:webview": "cd webview-ui && npm run watch",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "package": "npm run build:webview && npx @vscode/vsce package"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -95,6 +174,7 @@
     "@typescript-eslint/parser": "^6.19.0",
     "@vscode/test-cli": "^0.0.4",
     "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
     "eslint": "^8.56.0",
     "typescript": "^5.3.3"
   }

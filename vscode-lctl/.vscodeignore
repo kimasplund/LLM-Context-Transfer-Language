@@ -8,5 +8,18 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
+!out/**/*.js
 node_modules/**
-!node_modules/vscode-nls/**
+
+# Webview UI source files (built output is in out/webview/)
+webview-ui/node_modules/**
+webview-ui/src/**
+webview-ui/index.html
+webview-ui/package.json
+webview-ui/package-lock.json
+webview-ui/vite.config.ts
+
+# Other build artifacts
+*.vsix
+.eslintrc.js
+**/*.tsbuildinfo

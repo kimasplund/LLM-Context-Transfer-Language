@@ -24,14 +24,14 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Debuggers",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
@@ -87,7 +87,7 @@ packages = ["lctl"]
 
 [tool.black]
 line-length = 100
-target-version = ["py312", "py313", "py314"]
+target-version = ["py311", "py312", "py313", "py314"]
 
 [tool.ruff]
 line-length = 100
