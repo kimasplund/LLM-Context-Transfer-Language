@@ -222,6 +222,7 @@ class LCTLSemanticKernelTracer:
 
 
 __all__ = [
+    "LCTLSemanticKernelTracer",
     "trace_kernel",
     "is_available",
 ]

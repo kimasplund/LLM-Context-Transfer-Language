@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from functools import wraps
-
+from unittest.mock import MagicMock
 
 from typing import Any, AsyncIterator, Callable, Dict, Optional, TypeVar, Union
 

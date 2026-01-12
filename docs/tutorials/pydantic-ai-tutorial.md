@@ -159,7 +159,7 @@ async def main():
     traced = trace_agent(agent, chain_id="streaming-demo")
 
     async with traced.run_stream('Tell me a short story') as response:
-        async for chunk in response.stream():
+        async for chunk in response.stream_text():
             print(chunk, end="", flush=True)
 
     traced.export("streaming_trace.lctl.json")

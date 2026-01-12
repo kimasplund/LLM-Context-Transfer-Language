@@ -27,9 +27,9 @@ Before you begin, ensure you have:
 First, verify that both LCTL and CrewAI are properly installed:
 
 ```python
-from lctl.integrations.crewai import CREWAI_AVAILABLE
+from lctl.integrations.crewai import is_available
 
-if CREWAI_AVAILABLE:
+if is_available():
     print("CrewAI integration is ready!")
 else:
     print("Please install CrewAI: pip install crewai")
