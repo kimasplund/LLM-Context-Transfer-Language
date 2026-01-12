@@ -157,5 +157,13 @@ This task tracks the integration of various LLM agent frameworks into the LCTL (
 ## Phase 13: Extension Documentation
 - [x] **README.md** <!-- id: 14 -->
     - [x] Create `vscode-lctl/README.md` with features and usage <!-- id: 14.1 -->
+    - [x] Update install instructions to point to GitHub <!-- id: 14.2 -->
 - [x] **User Manual** <!-- id: 15 -->
     - [x] Create `vscode-lctl/MANUAL.md` with detailed workflows <!-- id: 15.1 -->
+
+## Phase 14: Project Hygiene (Complete)
+- [x] **License Standardization** <!-- id: 16 -->
+    - [x] Create root `LICENSE` (AGPLv3) <!-- id: 16.1 -->
+    - [x] Update `pyproject.toml` and `README.md` <!-- id: 16.2 -->
+    - [x] Update extension license <!-- id: 16.3 -->
+    - [x] Rewrite git history to enforce AGPLv3 <!-- id: 16.4 -->
