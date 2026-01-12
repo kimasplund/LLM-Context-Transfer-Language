@@ -1,5 +1,12 @@
 """LCTL Integrations - Framework integrations for automatic tracing."""
 
+from .claude_code import (
+    LCTLClaudeCodeTracer,
+    generate_hooks as generate_claude_code_hooks,
+)
+from .claude_code import (
+    is_available as claude_code_available,
+)
 from .autogen import (
     LCTLAutogenCallback,
     LCTLConversableAgent,
@@ -51,6 +58,10 @@ from .openai_agents import (
 )
 
 __all__ = [
+    # Claude Code integration
+    "LCTLClaudeCodeTracer",
+    "generate_claude_code_hooks",
+    "claude_code_available",
     # LangChain integration
     "LCTLCallbackHandler",
     "LCTLChain",
