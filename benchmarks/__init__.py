@@ -1,4 +1,4 @@
-"""LCTL Benchmarking Suite v4.0.
+"""LCTL Benchmarking Suite.
 
 Performance benchmarks for the LCTL event sourcing system.
 
@@ -24,7 +24,7 @@ from .fixtures import (
     generate_divergent_chains,
 )
 
-__version__ = "4.0.0"
+__version__ = "4.1.0"
 
 __all__ = [
     "ChainSize",

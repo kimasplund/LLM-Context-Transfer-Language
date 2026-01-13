@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">LCTL v4.0</h1>
+  <h1 align="center">LCTL v4.1</h1>
   <p align="center">
     <strong>Time-Travel Debugging for Multi-Agent LLM Workflows</strong>
   </p>

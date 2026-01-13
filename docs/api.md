@@ -1,8 +1,8 @@
-# LCTL v4.0 API Reference
+# LCTL API Reference
 
 > Time-travel debugging for multi-agent LLM workflows
 
-**Version**: 4.0.0
+**Version**: 4.1.0
 **Last Updated**: 2026-01-11
 
 ---

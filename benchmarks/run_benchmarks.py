@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import __version__
 from .bench_analysis import AnalysisBenchmarks, run_analysis_benchmarks
 from .bench_events import EventBenchmarks, run_event_benchmarks
 from .bench_replay import ReplayBenchmarks, run_replay_benchmarks
@@ -80,7 +81,7 @@ def generate_report(
         Complete benchmark report as a dictionary.
     """
     report = {
-        "lctl_version": "4.0.0",
+        "lctl_version": __version__,
         "benchmark_version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "system": get_system_info(),
@@ -316,7 +317,7 @@ Examples:
     results: Dict[str, List[Dict[str, Any]]] = {}
 
     if not args.quiet:
-        print("LCTL Benchmark Suite v4.0")
+        print(f"LCTL Benchmark Suite v{__version__}")
         print(f"Running: {', '.join(suites_to_run)}")
         if args.quick:
             print("Mode: Quick")

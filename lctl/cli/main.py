@@ -9,6 +9,7 @@ from typing import Optional
 
 import click
 
+from .. import __version__
 from ..core.events import Chain, Event, ReplayEngine
 from ..evaluation import ChainMetrics, compute_all_metrics
 
@@ -36,7 +37,7 @@ def _load_chain_safely(chain_file: str) -> Optional[Chain]:
 
 
 @click.group()
-@click.version_option(version="4.0.0", prog_name="lctl")
+@click.version_option(version=__version__, prog_name="lctl")
 def cli():
     """LCTL - Time-travel debugging for multi-agent workflows.
 

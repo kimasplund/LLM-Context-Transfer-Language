@@ -69,8 +69,14 @@ pydantic-ai = [
 semantic-kernel = [
     "semantic-kernel>=1.0.0",
 ]
+dspy = [
+    "dspy>=2.5.0",
+]
+llamaindex = [
+    "llama-index>=0.10.0",
+]
 all = [
-    "lctl[dashboard,langchain,crewai,autogen,openai-agents,pydantic-ai,semantic-kernel]",
+    "lctl[dashboard,langchain,crewai,autogen,openai-agents,pydantic-ai,semantic-kernel,dspy,llamaindex]",
 ]
 
 [project.scripts]

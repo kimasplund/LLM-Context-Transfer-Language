@@ -146,7 +146,7 @@ class TestCliVersion:
         """Test --version option."""
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "4.0.0" in result.output
+        assert "4.1.0" in result.output
 
 
 class TestReplayCommand:

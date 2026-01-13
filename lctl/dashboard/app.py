@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .. import __version__
 from ..core.events import Chain, ReplayEngine
 from ..evaluation.metrics import ChainMetrics
 from ..streaming.emitter import EventEmitter, StreamingEvent, StreamingEventType
@@ -41,7 +42,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     app = FastAPI(
         title="LCTL Dashboard",
         description="Web-based visualization for multi-agent LLM workflows",
-        version="4.0.0"
+        version=__version__
     )
 
     # Store working directory in app state
@@ -454,7 +455,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     @app.get("/api/health", response_class=JSONResponse)
     async def health_check():
         """Health check endpoint."""
-        return {"status": "ok", "version": "4.0.0", "streaming": True}
+        return {"status": "ok", "version": __version__, "streaming": True}
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):

@@ -1,6 +1,6 @@
 """LCTL Core - Event sourcing primitives for time-travel debugging."""
 
-from .events import Chain, Event, EventType, State
+from .events import Chain, Event, EventType, ReplayEngine, State
 from .session import LCTLSession
 
 __all__ = [
@@ -8,5 +8,6 @@ __all__ = [
     "Event",
     "EventType",
     "LCTLSession",
+    "ReplayEngine",
     "State",
 ]
