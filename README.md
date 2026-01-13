@@ -547,20 +547,11 @@ The LCTL dashboard provides a visual interface for exploring and debugging agent
 
 ### Screenshots
 
-<!-- TODO: Add dashboard screenshots -->
-```
-+---------------------------------------------------+
-|  LCTL Dashboard - security-review-001             |
-+---------------------------------------------------+
-|  Timeline          | Facts        | Analysis     |
-|  +--------------+  | F1: [===] 95%| Bottlenecks  |
-|  | analyzer [==]|  | F2: [== ] 81%| - reviewer   |
-|  | reviewer [===]  | F3: [x] BLOCK|   50% time   |
-|  | fixer    [= ]|  |              |              |
-|  +--------------+  |              | Tokens: 2340 |
-|  [<] Seq: 10 [>]  |              | Cost: $0.047 |
-+---------------------------------------------------+
-```
+#### VS Code Extension
+
+![LCTL VS Code Extension](docs/media/vsix.png)
+
+*The VS Code extension provides an integrated debugging experience with timeline visualization, swimlanes with collision detection, zoom controls, breadcrumb navigation, and resizable panels.*
 
 ### Starting the Dashboard
 
