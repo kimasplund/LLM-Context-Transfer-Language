@@ -55,42 +55,42 @@ Events diverged at seq 8:
 ### Basic Installation
 
 ```bash
-pip install git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git
+pip install git+https://github.com/kimasplund/LLM-Context-Trace-Library.git
 ```
 
 ### With Framework Support
 
 ```bash
 # LangChain integration
-pip install "lctl[langchain] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[langchain] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # CrewAI integration
-pip install "lctl[crewai] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[crewai] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # AutoGen/AG2 integration
-pip install "lctl[autogen] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[autogen] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # OpenAI Agents integration
-pip install "lctl[openai-agents] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[openai-agents] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # PydanticAI integration
-pip install "lctl[pydantic-ai] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[pydantic-ai] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # Semantic Kernel integration
-pip install "lctl[semantic-kernel] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[semantic-kernel] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # Web dashboard
-pip install "lctl[dashboard] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[dashboard] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 
 # Everything
-pip install "lctl[all] @ git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git"
+pip install "lctl[all] @ git+https://github.com/kimasplund/LLM-Context-Trace-Library.git"
 ```
 
 ### Development Installation
 
 ```bash
-git clone https://github.com/kimasplund/LLM-Context-Transfer-Language.git
-cd LLM-Context-Transfer-Language
+git clone https://github.com/kimasplund/LLM-Context-Trace-Library.git
+cd LLM-Context-Trace-Library
 pip install -e '.[dev]'
 ```
 
@@ -648,8 +648,8 @@ We welcome contributions! Here's how to get started:
 
 ```bash
 # Clone the repository
-git clone https://github.com/kimasplund/LLM-Context-Transfer-Language.git
-cd LLM-Context-Transfer-Language
+git clone https://github.com/kimasplund/LLM-Context-Trace-Library.git
+cd LLM-Context-Trace-Library
 
 # Create virtual environment
 python -m venv .venv

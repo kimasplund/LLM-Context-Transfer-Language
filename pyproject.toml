@@ -77,10 +77,10 @@ all = [
 lctl = "lctl.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/kimasplund/LLM-Context-Transfer-Language"
-Documentation = "https://github.com/kimasplund/LLM-Context-Transfer-Language#readme"
-Repository = "https://github.com/kimasplund/LLM-Context-Transfer-Language"
-Issues = "https://github.com/kimasplund/LLM-Context-Transfer-Language/issues"
+Homepage = "https://github.com/kimasplund/LLM-Context-Trace-Library"
+Documentation = "https://github.com/kimasplund/LLM-Context-Trace-Library#readme"
+Repository = "https://github.com/kimasplund/LLM-Context-Trace-Library"
+Issues = "https://github.com/kimasplund/LLM-Context-Trace-Library/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lctl"]

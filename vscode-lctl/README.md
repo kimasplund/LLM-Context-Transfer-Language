@@ -31,7 +31,7 @@ The **LCTL Time-Travel Debugger** for VS Code brings the power of the LLM Contex
 The extension relies on the `lctl` Python package.
 
 ```bash
-pip install git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git
+pip install git+https://github.com/kimasplund/LLM-Context-Trace-Library.git
 ```
 
 Ensure `lctl` is available in your system path or active virtual environment.
@@ -82,5 +82,5 @@ AGPL-3.0-only
 
 ## Links
 
-- [LCTL Documentation](https://github.com/kimasplund/LLM-Context-Transfer-Language)
-- [Report Issues](https://github.com/kimasplund/LLM-Context-Transfer-Language/issues)
+- [LCTL Documentation](https://github.com/kimasplund/LLM-Context-Trace-Library)
+- [Report Issues](https://github.com/kimasplund/LLM-Context-Trace-Library/issues)

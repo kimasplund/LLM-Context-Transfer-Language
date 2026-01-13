@@ -16,7 +16,7 @@ This manual provides a detailed guide on using the **LCTL Time-Travel Debugger**
 - Python 3.9+ installed.
 - `lctl` package installed:
   ```bash
-  pip install git+https://github.com/kimasplund/LLM-Context-Transfer-Language.git
+  pip install git+https://github.com/kimasplund/LLM-Context-Trace-Library.git
   ```
 
 ### Installation
