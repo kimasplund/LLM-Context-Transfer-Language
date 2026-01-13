@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import type { LctlChainFile, LctlEvent, ChainStats, ReplayState, FilterState, FactInfo } from './types';
 
+interface NavigationItem {
+  event: LctlEvent;
+  label: string;
+}
+
 interface AppState {
   // Chain data
   chain: LctlChainFile | null;
@@ -24,6 +29,15 @@ interface AppState {
   // Selected event
   selectedEvent: LctlEvent | null;
 
+  // Navigation history for breadcrumbs
+  navigationHistory: NavigationItem[];
+
+  // Zoom level for timeline (1.0 = 100%)
+  zoomLevel: number;
+
+  // Details panel height (pixels)
+  detailsPanelHeight: number;
+
   // Actions
   setChain: (chain: LctlChainFile, path: string, isRecording: boolean) => void;
   setReplayState: (state: Partial<ReplayState>) => void;
@@ -35,6 +49,14 @@ interface AppState {
   setPlaySpeed: (speed: number) => void;
   setCompareChain: (chain: LctlChainFile | null, path: string | null) => void;
   toggleDiffMode: () => void;
+
+  // New navigation actions
+  navigateBack: () => void;
+  clearNavigation: () => void;
+  setZoomLevel: (level: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  setDetailsPanelHeight: (height: number) => void;
 }
 
 // Model pricing per 1M tokens
@@ -130,6 +152,9 @@ export const useStore = create<AppState>((set, get) => ({
     timeRange: null
   },
   selectedEvent: null,
+  navigationHistory: [],
+  zoomLevel: 1.0,
+  detailsPanelHeight: 250,
 
   // Actions
   setChain: (chain, path, isRecording) => {
@@ -157,9 +182,25 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   selectEvent: (event) => {
-    set({ selectedEvent: event });
-    if (event) {
-      set({ replay: { ...get().replay, currentSeq: event.seq } });
+    const { selectedEvent, navigationHistory } = get();
+
+    // Add current selection to history before changing (if there was one)
+    if (selectedEvent && event && selectedEvent.seq !== event.seq) {
+      const label = selectedEvent.agent
+        ? `${selectedEvent.agent}: ${selectedEvent.type}`
+        : selectedEvent.type;
+      const newHistory = [...navigationHistory, { event: selectedEvent, label }];
+      // Keep last 10 items
+      set({
+        selectedEvent: event,
+        navigationHistory: newHistory.slice(-10),
+        replay: { ...get().replay, currentSeq: event.seq }
+      });
+    } else {
+      set({ selectedEvent: event });
+      if (event) {
+        set({ replay: { ...get().replay, currentSeq: event.seq } });
+      }
     }
   },
 
@@ -192,6 +233,46 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleDiffMode: () => {
     set({ isDiffMode: !get().isDiffMode });
+  },
+
+  // Navigation actions
+  navigateBack: () => {
+    const { navigationHistory } = get();
+    if (navigationHistory.length === 0) return;
+
+    const newHistory = [...navigationHistory];
+    const lastItem = newHistory.pop();
+    if (lastItem) {
+      set({
+        selectedEvent: lastItem.event,
+        navigationHistory: newHistory,
+        replay: { ...get().replay, currentSeq: lastItem.event.seq }
+      });
+    }
+  },
+
+  clearNavigation: () => {
+    set({ navigationHistory: [], selectedEvent: null });
+  },
+
+  // Zoom actions
+  setZoomLevel: (level) => {
+    set({ zoomLevel: Math.max(0.25, Math.min(4, level)) });
+  },
+
+  zoomIn: () => {
+    const { zoomLevel } = get();
+    set({ zoomLevel: Math.min(4, zoomLevel * 1.25) });
+  },
+
+  zoomOut: () => {
+    const { zoomLevel } = get();
+    set({ zoomLevel: Math.max(0.25, zoomLevel / 1.25) });
+  },
+
+  // Panel resize
+  setDetailsPanelHeight: (height) => {
+    set({ detailsPanelHeight: Math.max(100, Math.min(500, height)) });
   }
 }));
 

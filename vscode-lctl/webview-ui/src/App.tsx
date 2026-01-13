@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useStore } from './store';
 import { getVsCodeApi } from './hooks/useVsCode';
 import Header from './components/Header';
@@ -8,10 +8,53 @@ import FilterPanel from './components/FilterPanel';
 import EventDetails from './components/EventDetails';
 import ReplayBar from './components/ReplayBar';
 import DiffPanel from './components/DiffPanel';
+import Breadcrumb from './components/Breadcrumb';
 import type { ExtensionMessage } from './types';
 
 // Get VS Code API (cached)
 export const vscode = getVsCodeApi();
+
+function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
+  const [isDragging, setIsDragging] = useState(false);
+  const startY = useRef(0);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    startY.current = e.clientY;
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = startY.current - e.clientY;
+      startY.current = e.clientY;
+      onResize(delta);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, onResize]);
+
+  return (
+    <div
+      className={`resize-handle ${isDragging ? 'active' : ''}`}
+      onMouseDown={handleMouseDown}
+    >
+      <div className="resize-handle-bar" />
+    </div>
+  );
+}
 
 function App() {
   const chain = useStore((s) => s.chain);
@@ -20,6 +63,23 @@ function App() {
   const compareChain = useStore((s) => s.compareChain);
   const isDiffMode = useStore((s) => s.isDiffMode);
   const toggleDiffMode = useStore((s) => s.toggleDiffMode);
+  const navigateBack = useStore((s) => s.navigateBack);
+  const detailsPanelHeight = useStore((s) => s.detailsPanelHeight);
+  const setDetailsPanelHeight = useStore((s) => s.setDetailsPanelHeight);
+
+  // Handle keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt+Left to go back in navigation history
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateBack();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [navigateBack]);
 
   useEffect(() => {
     // Listen for messages from extension
@@ -50,6 +110,10 @@ function App() {
 
     return () => window.removeEventListener('message', handleMessage);
   }, [setChain, setCompareChain]);
+
+  const handlePanelResize = useCallback((delta: number) => {
+    setDetailsPanelHeight(detailsPanelHeight + delta);
+  }, [detailsPanelHeight, setDetailsPanelHeight]);
 
   if (!chain) {
     return (
@@ -87,13 +151,17 @@ function App() {
     <div className="app-container">
       <Header />
       <StatsGrid />
+      <Breadcrumb />
       <div className="main-content">
         <div className="sidebar">
           <FilterPanel />
         </div>
         <div className="content-area">
           <Timeline />
-          <EventDetails />
+          <ResizeHandle onResize={handlePanelResize} />
+          <div style={{ height: detailsPanelHeight, flexShrink: 0 }}>
+            <EventDetails />
+          </div>
         </div>
       </div>
       <ReplayBar />
