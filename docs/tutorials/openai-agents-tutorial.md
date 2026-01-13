@@ -1,6 +1,6 @@
 # Using LCTL with OpenAI Agents SDK
 
-This tutorial shows you how to integrate LCTL (LLM Context Transfer Language) v4.0 with the OpenAI Agents SDK for time-travel debugging and observability of agent runs, tool calls, and handoffs.
+This tutorial shows you how to integrate LCTL (LLM Context Trace Library) v4.0 with the OpenAI Agents SDK for time-travel debugging and observability of agent runs, tool calls, and handoffs.
 
 ## Prerequisites
 

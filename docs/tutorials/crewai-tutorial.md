@@ -1,6 +1,6 @@
 # Using LCTL with CrewAI
 
-This tutorial shows you how to integrate LCTL (LLM Context Transfer Language) v4.0 with CrewAI crews for time-travel debugging and observability of multi-agent workflows.
+This tutorial shows you how to integrate LCTL (LLM Context Trace Library) v4.0 with CrewAI crews for time-travel debugging and observability of multi-agent workflows.
 
 ## Prerequisites
 

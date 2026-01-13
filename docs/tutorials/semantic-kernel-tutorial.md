@@ -1,6 +1,6 @@
 # Using LCTL with Semantic Kernel
 
-This tutorial shows you how to integrate LCTL (LLM Context Transfer Language) v4.0 with Semantic Kernel (v1.x) for time-travel debugging and function invocation tracing.
+This tutorial shows you how to integrate LCTL (LLM Context Trace Library) v4.0 with Semantic Kernel (v1.x) for time-travel debugging and function invocation tracing.
 
 ## Prerequisites
 
@@ -118,7 +118,7 @@ async def main():
 
     # Invoke
     text = """
-    LCTL (LLM Context Transfer Language) is a protocol for time-travel debugging.
+    LCTL (LLM Context Trace Library) is a library for time-travel debugging.
     It uses event sourcing to capture every agent action as an immutable event.
     """
     

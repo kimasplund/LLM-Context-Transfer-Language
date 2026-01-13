@@ -1,4 +1,4 @@
-"""LCTL - LLM Context Transfer Language.
+"""LCTL - LLM Context Trace Library.
 
 Time-travel debugging for multi-agent LLM workflows.
 

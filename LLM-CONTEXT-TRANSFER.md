@@ -1,4 +1,4 @@
-# LLM Context Transfer Language (LCTL) v4.0
+# LLM Context Trace Library (LCTL) v4.0
 
 A tool-first observability protocol enabling time-travel debugging for multi-agent LLM workflows.
 

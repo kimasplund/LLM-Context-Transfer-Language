@@ -1,6 +1,6 @@
 # Task: LLM Agent Framework Integrations
 
-This task tracks the integration of various LLM agent frameworks into the LCTL (LLM Context Transfer Layer) project.
+This task tracks the integration of various LLM agent frameworks into the LCTL (LLM Context Trace Library) project.
 
 ## Phase 1: Existing Integrations (Complete)
 

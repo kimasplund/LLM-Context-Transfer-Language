@@ -1,6 +1,6 @@
 # Using LCTL with LangChain
 
-This tutorial shows you how to integrate LCTL (LLM Context Transfer Language) v4.0 with LangChain chains and agents for time-travel debugging and observability.
+This tutorial shows you how to integrate LCTL (LLM Context Trace Library) v4.0 with LangChain chains and agents for time-travel debugging and observability.
 
 ## Prerequisites
 

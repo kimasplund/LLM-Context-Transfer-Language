@@ -37,7 +37,7 @@
 
 ## Overview
 
-LCTL (LLM Context Transfer Language) provides event sourcing and time-travel debugging capabilities for multi-agent LLM workflows. It captures execution traces as immutable events, enabling replay, analysis, and debugging of complex agent interactions.
+LCTL (LLM Context Trace Library) provides event sourcing and time-travel debugging capabilities for multi-agent LLM workflows. It captures execution traces as immutable events, enabling replay, analysis, and debugging of complex agent interactions.
 
 ### Key Features
 

@@ -1,6 +1,6 @@
 # LCTL Time-Travel Debugger
 
-The **LCTL Time-Travel Debugger** for VS Code brings the power of the LLM Context Transfer Language (LCTL) directly into your editor. It provides a visual interface to explore, debug, and replay agent execution chains.
+The **LCTL Time-Travel Debugger** for VS Code brings the power of the LLM Context Trace Library (LCTL) directly into your editor. It provides a visual interface to explore, debug, and replay agent execution chains.
 
 ## Features
 
