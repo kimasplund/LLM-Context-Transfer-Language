@@ -14,6 +14,8 @@
   <a href="#framework-integrations">Integrations</a> &bull;
   <a href="#cli-reference">CLI</a> &bull;
   <a href="#web-dashboard">Dashboard</a> &bull;
+  <a href="#dashboard-security">Security</a> &bull;
+  <a href="#rpa-integration">RPA</a> &bull;
   <a href="#api-reference">API</a>
 </p>
 
@@ -611,6 +613,204 @@ pip install 'lctl[dashboard]'
 # Launch
 lctl dashboard --dir ./my-traces
 ```
+
+## Dashboard Security
+
+The LCTL dashboard supports API key authentication for secure deployments.
+
+### Configuration
+
+Security is configured via environment variables:
+
+```bash
+# Enable API key authentication
+export LCTL_REQUIRE_API_KEY=true
+
+# Set allowed API keys (comma-separated)
+export LCTL_API_KEYS="key1,key2,key3"
+
+# Bypass authentication for localhost (default: true)
+export LCTL_LOCALHOST_BYPASS=true
+```
+
+### Using API Keys
+
+When authentication is enabled, include the API key in requests:
+
+```bash
+# Using X-API-Key header
+curl -H "X-API-Key: your-key" http://localhost:8000/api/chains
+```
+
+### Security Modes
+
+| Mode | Description |
+|------|-------------|
+| **Development** (default) | Localhost bypass enabled, no API key required |
+| **Production** | Set `LCTL_REQUIRE_API_KEY=true` and configure `LCTL_API_KEYS` |
+| **Hybrid** | Enable API keys but allow localhost bypass for local dev |
+
+### Generating API Keys
+
+```bash
+# Generate a secure API key
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+---
+
+## RPA Integration
+
+LCTL provides RPA-friendly endpoints designed for integration with UiPath, Power Automate, and other automation platforms.
+
+### RPA Endpoints
+
+All RPA endpoints use flat data structures optimized for DataTable processing.
+
+#### Summary Data
+
+```bash
+GET /api/rpa/summary/{filename}
+```
+
+Returns minimal flat summary for quick processing:
+
+```json
+{
+  "chain_id": "workflow-123",
+  "total_events": 50,
+  "total_duration_ms": 45000,
+  "status": "success",
+  "error_count": 0,
+  "agents": ["analyzer", "reviewer"],
+  "start_time": "2024-01-15T10:30:00Z",
+  "end_time": "2024-01-15T10:30:45Z"
+}
+```
+
+#### Flattened Events
+
+```bash
+GET /api/rpa/events/{filename}?event_types=step_start,step_end&limit=100
+```
+
+Returns events as flat records for DataTable import:
+
+```json
+{
+  "events": [
+    {
+      "seq": 1,
+      "type": "step_start",
+      "timestamp": "2024-01-15T10:30:00Z",
+      "agent": "analyzer",
+      "duration_ms": null,
+      "outcome": null,
+      "tool": null,
+      "fact_id": null,
+      "error_type": null
+    }
+  ],
+  "total": 50,
+  "filtered": 25
+}
+```
+
+#### Export to CSV/JSON
+
+```bash
+GET /api/rpa/export/{filename}?format=csv
+```
+
+Direct export for Excel and database import.
+
+#### Batch Operations
+
+Process multiple chains in a single request:
+
+```bash
+POST /api/rpa/batch/metrics
+Content-Type: application/json
+
+{
+  "filenames": ["chain1.lctl.json", "chain2.lctl.json", "chain3.lctl.json"]
+}
+```
+
+#### Cross-Chain Search
+
+Search across all chains:
+
+```bash
+POST /api/rpa/search
+Content-Type: application/json
+
+{
+  "query": "SQL injection",
+  "event_types": ["error", "fact_added"],
+  "limit": 100
+}
+```
+
+### Webhooks
+
+Register webhooks for real-time notifications:
+
+```bash
+POST /api/rpa/webhooks
+Content-Type: application/json
+
+{
+  "url": "https://your-endpoint.com/webhook",
+  "events": ["error", "step_end"],
+  "secret": "optional-hmac-secret"
+}
+```
+
+### Polling for Updates
+
+For systems that can't use webhooks:
+
+```bash
+GET /api/rpa/poll/{filename}?since_seq=10
+```
+
+### Submit RPA Events
+
+Record events from external RPA workflows:
+
+```bash
+POST /api/rpa/submit
+Content-Type: application/json
+
+{
+  "chain_id": "uipath-workflow-001",
+  "agent": "uipath-bot",
+  "event_type": "step_start",
+  "data": {
+    "intent": "process_invoice",
+    "input_summary": "Invoice #12345"
+  }
+}
+```
+
+### UiPath Integration Example
+
+```vb
+' UiPath workflow to fetch LCTL metrics
+Dim client As New System.Net.Http.HttpClient()
+client.DefaultRequestHeaders.Add("X-API-Key", apiKey)
+
+Dim response = client.GetAsync("http://lctl-server:8000/api/rpa/summary/workflow.lctl.json").Result
+Dim summary = JsonConvert.DeserializeObject(Of Dictionary(Of String, Object))(response.Content.ReadAsStringAsync().Result)
+
+' Process summary in UiPath DataTable
+If summary("status") = "error" Then
+    ' Trigger error handling workflow
+End If
+```
+
+---
 
 ## API Reference
 
