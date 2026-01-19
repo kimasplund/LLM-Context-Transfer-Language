@@ -1,13 +1,17 @@
 """LCTL Dashboard - FastAPI web application for chain visualization."""
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -97,7 +101,18 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     app.state.engine_cache = {}  # Cache for ReplayEngine instances: (abs_path, mtime) -> engine
     app.state.emitter = EventEmitter(max_history=500)  # Global event emitter for streaming
     app.state.webhooks: dict[str, WebhookRegistration] = {}  # Registered webhooks by ID
-    app.state.api_keys: set[str] = set()  # Valid API keys (loaded from env or config)
+
+    # API Key Security Configuration
+    # Load API keys from environment variable (comma-separated) or generate one
+    env_keys = os.environ.get("LCTL_API_KEYS", "")
+    if env_keys:
+        app.state.api_keys = set(k.strip() for k in env_keys.split(",") if k.strip())
+    else:
+        app.state.api_keys = set()
+
+    # Security settings
+    app.state.require_api_key = os.environ.get("LCTL_REQUIRE_API_KEY", "false").lower() == "true"
+    app.state.localhost_bypass = os.environ.get("LCTL_LOCALHOST_BYPASS", "true").lower() == "true"
 
     # Get paths to static files and templates
     dashboard_dir = Path(__file__).parent
@@ -142,6 +157,53 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Invalid chain file: {e}")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error loading chain: {e}")
+
+    def is_localhost(request: Request) -> bool:
+        """Check if request is from localhost."""
+        client_host = request.client.host if request.client else ""
+        return client_host in ("127.0.0.1", "localhost", "::1")
+
+    async def verify_api_key(
+        request: Request,
+        x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    ) -> bool:
+        """Verify API key for protected endpoints.
+
+        Security behavior:
+        - If LCTL_REQUIRE_API_KEY=true: Always require valid API key
+        - If LCTL_LOCALHOST_BYPASS=true (default): Skip auth for localhost
+        - Otherwise: Require API key for non-localhost requests
+        """
+        # Check if we should bypass for localhost
+        if app.state.localhost_bypass and is_localhost(request):
+            return True
+
+        # If API key enforcement is disabled and no keys configured, allow
+        if not app.state.require_api_key and not app.state.api_keys:
+            return True
+
+        # Require API key if enforcement enabled or keys are configured
+        if app.state.require_api_key or app.state.api_keys:
+            if not x_api_key:
+                raise HTTPException(
+                    status_code=401,
+                    detail="API key required. Set X-API-Key header.",
+                    headers={"WWW-Authenticate": "ApiKey"}
+                )
+
+            # Constant-time comparison to prevent timing attacks
+            key_valid = any(
+                hmac.compare_digest(x_api_key, valid_key)
+                for valid_key in app.state.api_keys
+            )
+
+            if not key_valid:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid API key"
+                )
+
+        return True
 
     @app.get("/", response_class=HTMLResponse)
     async def index():
@@ -690,11 +752,56 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     # =========================================================================
-    # RPA / UiPath Integration Endpoints
+    # RPA / UiPath Integration Endpoints (Protected by API Key)
     # =========================================================================
 
+    @app.get("/api/rpa/auth/status", response_class=JSONResponse)
+    async def rpa_auth_status(request: Request):
+        """Check authentication status and requirements.
+
+        Returns info about security configuration without requiring auth.
+        """
+        return {
+            "require_api_key": app.state.require_api_key,
+            "localhost_bypass": app.state.localhost_bypass,
+            "is_localhost": is_localhost(request),
+            "api_keys_configured": len(app.state.api_keys) > 0,
+            "auth_required": (
+                app.state.require_api_key or
+                (app.state.api_keys and not (app.state.localhost_bypass and is_localhost(request)))
+            )
+        }
+
+    @app.post("/api/rpa/auth/generate-key", response_class=JSONResponse)
+    async def rpa_generate_api_key(
+        request: Request,
+        _auth: bool = Depends(verify_api_key)
+    ):
+        """Generate a new API key (requires existing auth or localhost).
+
+        For initial setup on localhost, this can be called without auth.
+        """
+        # Only allow from localhost if no keys exist yet
+        if not app.state.api_keys and not is_localhost(request):
+            raise HTTPException(
+                status_code=403,
+                detail="Initial key generation only allowed from localhost"
+            )
+
+        new_key = secrets.token_urlsafe(32)
+        app.state.api_keys.add(new_key)
+
+        return {
+            "api_key": new_key,
+            "message": "Store this key securely. It cannot be retrieved later.",
+            "usage": "Set header: X-API-Key: " + new_key
+        }
+
     @app.get("/api/rpa/summary/{filename}", response_class=JSONResponse)
-    async def rpa_summary(filename: str):
+    async def rpa_summary(
+        filename: str,
+        _auth: bool = Depends(verify_api_key)
+    ):
         """Get minimal summary for quick RPA checks.
 
         Returns flat structure optimized for UiPath DataTable mapping.
@@ -727,7 +834,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         event_type: Optional[str] = Query(None, description="Filter by event type"),
         agent: Optional[str] = Query(None, description="Filter by agent"),
         limit: int = Query(1000, description="Max events to return"),
-        offset: int = Query(0, description="Skip first N events")
+        offset: int = Query(0, description="Skip first N events"),
+        _auth: bool = Depends(verify_api_key)
     ):
         """Get flattened events list optimized for RPA DataTable.
 
@@ -788,7 +896,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     async def rpa_export(
         filename: str,
         format: str = Query("csv", description="Export format: csv, json"),
-        event_type: Optional[str] = Query(None, description="Filter by event type")
+        event_type: Optional[str] = Query(None, description="Filter by event type"),
+        _auth: bool = Depends(verify_api_key)
     ):
         """Export chain data in RPA-friendly formats (CSV or JSON).
 
@@ -837,7 +946,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             return JSONResponse({"events": events, "chain_id": chain.id})
 
     @app.post("/api/rpa/batch/metrics", response_class=JSONResponse)
-    async def rpa_batch_metrics(request: BatchMetricsRequest):
+    async def rpa_batch_metrics(
+        request: BatchMetricsRequest,
+        _auth: bool = Depends(verify_api_key)
+    ):
         """Get metrics for multiple chains in one request.
 
         Reduces API calls for UiPath workflows processing multiple chains.
@@ -877,7 +989,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.post("/api/rpa/search", response_class=JSONResponse)
-    async def rpa_search(request: SearchRequest):
+    async def rpa_search(
+        request: SearchRequest,
+        _auth: bool = Depends(verify_api_key)
+    ):
         """Search across all chains for specific events or patterns.
 
         Useful for finding errors, specific agents, or patterns across workflows.
@@ -939,7 +1054,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.post("/api/rpa/webhooks", response_class=JSONResponse)
-    async def register_webhook(webhook: WebhookRegistration):
+    async def register_webhook(
+        webhook: WebhookRegistration,
+        _auth: bool = Depends(verify_api_key)
+    ):
         """Register a webhook for event notifications.
 
         UiPath can receive callbacks when specific events occur.
@@ -955,7 +1073,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.get("/api/rpa/webhooks", response_class=JSONResponse)
-    async def list_webhooks():
+    async def list_webhooks(_auth: bool = Depends(verify_api_key)):
         """List all registered webhooks."""
         webhooks = []
         for wid, webhook in app.state.webhooks.items():
@@ -968,7 +1086,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         return {"webhooks": webhooks, "total": len(webhooks)}
 
     @app.delete("/api/rpa/webhooks/{webhook_id}", response_class=JSONResponse)
-    async def delete_webhook(webhook_id: str):
+    async def delete_webhook(webhook_id: str, _auth: bool = Depends(verify_api_key)):
         """Unregister a webhook."""
         if webhook_id in app.state.webhooks:
             del app.state.webhooks[webhook_id]
@@ -976,7 +1094,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         raise HTTPException(status_code=404, detail="Webhook not found")
 
     @app.post("/api/rpa/submit", response_class=JSONResponse)
-    async def rpa_submit_event(event: RpaEventSubmission):
+    async def rpa_submit_event(
+        event: RpaEventSubmission,
+        _auth: bool = Depends(verify_api_key)
+    ):
         """Submit an event from RPA workflow.
 
         Allows UiPath to log its own workflow steps to LCTL.
@@ -1007,7 +1128,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     async def rpa_poll(
         filename: str,
         since_seq: int = Query(0, description="Return events after this sequence"),
-        timeout_ms: int = Query(0, description="Long-poll timeout (0 = immediate)")
+        timeout_ms: int = Query(0, description="Long-poll timeout (0 = immediate)"),
+        _auth: bool = Depends(verify_api_key)
     ):
         """Poll for new events (alternative to streaming for RPA).
 
@@ -1035,7 +1157,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.get("/api/rpa/errors/{filename}", response_class=JSONResponse)
-    async def rpa_errors(filename: str):
+    async def rpa_errors(filename: str, _auth: bool = Depends(verify_api_key)):
         """Get all errors from a chain in flat format.
 
         Quick endpoint to check if a workflow had any issues.
