@@ -9,6 +9,8 @@ import EventDetails from './components/EventDetails';
 import ReplayBar from './components/ReplayBar';
 import DiffPanel from './components/DiffPanel';
 import Breadcrumb from './components/Breadcrumb';
+import Minimap from './components/Minimap';
+import { KeyboardShortcutsOverlay, useKeyboardShortcuts } from './components/KeyboardShortcuts';
 import type { ExtensionMessage } from './types';
 
 // Get VS Code API (cached)
@@ -63,23 +65,11 @@ function App() {
   const compareChain = useStore((s) => s.compareChain);
   const isDiffMode = useStore((s) => s.isDiffMode);
   const toggleDiffMode = useStore((s) => s.toggleDiffMode);
-  const navigateBack = useStore((s) => s.navigateBack);
   const detailsPanelHeight = useStore((s) => s.detailsPanelHeight);
   const setDetailsPanelHeight = useStore((s) => s.setDetailsPanelHeight);
 
-  // Handle keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Alt+Left to go back in navigation history
-      if (e.altKey && e.key === 'ArrowLeft') {
-        e.preventDefault();
-        navigateBack();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navigateBack]);
+  // Keyboard shortcuts hook
+  const { showShortcuts, setShowShortcuts } = useKeyboardShortcuts();
 
   useEffect(() => {
     // Listen for messages from extension
@@ -151,6 +141,7 @@ function App() {
     <div className="app-container">
       <Header />
       <StatsGrid />
+      <Minimap />
       <Breadcrumb />
       <div className="main-content">
         <div className="sidebar">
@@ -165,6 +156,10 @@ function App() {
         </div>
       </div>
       <ReplayBar />
+      <KeyboardShortcutsOverlay
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </div>
   );
 }
