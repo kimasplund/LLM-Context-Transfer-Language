@@ -1,8 +1,52 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { ChainTreeProvider, ChainTreeItem, LctlChainFile, LctlEvent } from './chainProvider';
 
 type DashboardOpener = (uri?: vscode.Uri) => void;
+
+// Output channel for CLI commands (safer than terminal)
+let outputChannel: vscode.OutputChannel | undefined;
+
+function getOutputChannel(): vscode.OutputChannel {
+    if (!outputChannel) {
+        outputChannel = vscode.window.createOutputChannel('LCTL');
+    }
+    return outputChannel;
+}
+
+/**
+ * Execute LCTL CLI command safely using spawn (no shell injection)
+ */
+function runLctlCommand(command: string, args: string[]): void {
+    const channel = getOutputChannel();
+    channel.show(true);
+    channel.appendLine(`\n$ lctl ${command} ${args.map(a => `"${a}"`).join(' ')}\n`);
+
+    const proc = spawn('lctl', [command, ...args], {
+        shell: false,  // Important: no shell = no injection
+        env: process.env
+    });
+
+    proc.stdout.on('data', (data: Buffer) => {
+        channel.append(data.toString());
+    });
+
+    proc.stderr.on('data', (data: Buffer) => {
+        channel.append(data.toString());
+    });
+
+    proc.on('error', (err: Error) => {
+        channel.appendLine(`\nError: ${err.message}`);
+        if (err.message.includes('ENOENT')) {
+            channel.appendLine('Make sure lctl is installed: pip install lctl');
+        }
+    });
+
+    proc.on('close', (code: number | null) => {
+        channel.appendLine(`\n[Process exited with code ${code}]`);
+    });
+}
 
 export function registerCommands(
     context: vscode.ExtensionContext,
@@ -70,14 +114,7 @@ export function registerCommands(
                 return;
             }
 
-            const terminalName = 'LCTL Replay';
-            let terminal = vscode.window.terminals.find(t => t.name === terminalName);
-            if (!terminal) {
-                terminal = vscode.window.createTerminal(terminalName);
-            }
-
-            terminal.show();
-            terminal.sendText(`lctl replay "${uri.fsPath}"`);
+            runLctlCommand('replay', [uri.fsPath]);
         })
     );
 
@@ -199,14 +236,7 @@ export function registerCommands(
                 return;
             }
 
-            const terminalName = 'LCTL Stats';
-            let terminal = vscode.window.terminals.find(t => t.name === terminalName);
-            if (!terminal) {
-                terminal = vscode.window.createTerminal(terminalName);
-            }
-
-            terminal.show();
-            terminal.sendText(`lctl stats "${uri.fsPath}"`);
+            runLctlCommand('stats', [uri.fsPath]);
         })
     );
 
@@ -259,15 +289,8 @@ export function registerCommands(
 
             if (!second) {return;}
 
-            // Run diff command
-            const terminalName = 'LCTL Diff';
-            let terminal = vscode.window.terminals.find(t => t.name === terminalName);
-            if (!terminal) {
-                terminal = vscode.window.createTerminal(terminalName);
-            }
-
-            terminal.show();
-            terminal.sendText(`lctl diff "${firstUri.fsPath}" "${second.uri.fsPath}"`);
+            // Run diff command safely
+            runLctlCommand('diff', [firstUri.fsPath, second.uri.fsPath]);
         })
     );
 }

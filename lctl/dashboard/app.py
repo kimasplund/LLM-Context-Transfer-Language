@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -43,6 +44,23 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         title="LCTL Dashboard",
         description="Web-based visualization for multi-agent LLM workflows",
         version=__version__
+    )
+
+    # Add CORS middleware for local development
+    # Only allow localhost origins for security
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:*",
+            "http://127.0.0.1:*",
+            "http://localhost:3000",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8080",
+        ],
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
     )
 
     # Store working directory in app state

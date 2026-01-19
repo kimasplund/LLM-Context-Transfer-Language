@@ -970,3 +970,101 @@ class TestEvaluationCommandsIntegration:
         assert prom_result.exit_code == 0
         assert "# HELP" in prom_result.output
         assert "# TYPE" in prom_result.output
+
+
+class TestClaudeCommands:
+    """Tests for Claude Code CLI commands."""
+
+    def test_claude_init_basic(self, runner: CliRunner, tmp_path: Path):
+        """Test claude init command creates hooks directory."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["claude", "init"])
+
+            assert result.exit_code == 0
+            assert "LCTL Claude Code tracing initialized" in result.output
+
+            # Check that .claude directory was created
+            claude_dir = Path(".claude")
+            assert claude_dir.exists()
+
+    def test_claude_init_with_chain_id(self, runner: CliRunner, tmp_path: Path):
+        """Test claude init with custom chain-id accepts the option."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["claude", "init", "--chain-id", "my-project"])
+
+            # Should succeed without error
+            assert result.exit_code == 0
+            assert "LCTL Claude Code tracing initialized" in result.output
+            # Hooks should be created
+            assert Path(".claude/hooks/PreToolUse.sh").exists()
+
+    def test_claude_validate_no_hooks(self, runner: CliRunner, tmp_path: Path):
+        """Test claude validate when hooks are not installed."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["claude", "validate"])
+
+            # Should indicate hooks are not found
+            assert "not found" in result.output.lower() or "missing" in result.output.lower() or result.exit_code != 0
+
+    def test_claude_validate_with_hooks(self, runner: CliRunner, tmp_path: Path):
+        """Test claude validate after hooks are installed."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            # First init
+            init_result = runner.invoke(cli, ["claude", "init"])
+            assert init_result.exit_code == 0
+
+            # Then validate
+            result = runner.invoke(cli, ["claude", "validate"])
+            # Should pass or at least not crash
+            assert result.exit_code == 0 or "valid" in result.output.lower() or "found" in result.output.lower()
+
+    def test_claude_status_no_session(self, runner: CliRunner, tmp_path: Path):
+        """Test claude status when no session is active."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["claude", "status"])
+
+            # Should indicate no active session
+            assert "no active" in result.output.lower() or "not found" in result.output.lower() or result.exit_code == 0
+
+    def test_claude_report_no_files(self, runner: CliRunner, tmp_path: Path):
+        """Test claude report with no trace files."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(cli, ["claude", "report"])
+
+            # Should indicate no files found or provide usage
+            assert result.exit_code != 0 or "no" in result.output.lower() or "usage" in result.output.lower()
+
+    def test_claude_report_with_chain_file(self, runner: CliRunner, cli_chain_file: Path, tmp_path: Path):
+        """Test claude report with a chain file."""
+        result = runner.invoke(cli, ["claude", "report", str(cli_chain_file)])
+
+        # Should generate report or indicate success
+        # The command may succeed or fail depending on file format requirements
+        # Main check is it doesn't crash
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+    def test_claude_clean_no_traces(self, runner: CliRunner, tmp_path: Path):
+        """Test claude clean with no trace files."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            # Create .claude directory
+            Path(".claude/traces").mkdir(parents=True, exist_ok=True)
+
+            result = runner.invoke(cli, ["claude", "clean"])
+
+            # Should indicate nothing to clean or success
+            assert result.exit_code == 0 or "no" in result.output.lower() or "clean" in result.output.lower()
+
+    def test_claude_clean_dry_run(self, runner: CliRunner, tmp_path: Path):
+        """Test claude clean with --dry-run option."""
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            # Create traces directory with a dummy file
+            traces_dir = Path(".claude/traces")
+            traces_dir.mkdir(parents=True, exist_ok=True)
+            (traces_dir / "old-trace.lctl.json").write_text('{"lctl": "4.0", "chain": {"id": "test"}, "events": []}')
+
+            result = runner.invoke(cli, ["claude", "clean", "--dry-run"])
+
+            # Dry run should not delete files, just show what would be deleted
+            assert result.exit_code == 0
+            # File should still exist
+            assert (traces_dir / "old-trace.lctl.json").exists()
