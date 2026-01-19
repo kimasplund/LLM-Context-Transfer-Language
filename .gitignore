@@ -17,3 +17,4 @@ htmlcov/
 *.log
 coverage.xml
 node_modules
+cli_test.lctl-report.html
