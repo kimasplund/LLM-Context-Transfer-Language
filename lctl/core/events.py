@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, TypeVar
 
 import yaml
 
+from .schema import CURRENT_VERSION, SchemaMigrator, validate_version
+
 T = TypeVar("T")
 
 
@@ -165,7 +167,7 @@ class Chain:
     """An LCTL chain - a collection of events."""
     id: str
     events: List[Event] = field(default_factory=list)
-    version: str = "4.0"
+    version: str = CURRENT_VERSION
 
     def add_event(self, event: Event) -> None:
         """Add event to the chain."""
@@ -183,19 +185,23 @@ class Chain:
         if not isinstance(d, dict):
             raise ValueError(f"Expected dict, got {type(d).__name__}")
 
+        # Validate and migrate schema version
+        validate_version(d)
+        d = SchemaMigrator.migrate(d)
+
         chain_meta = d.get("chain")
 
         # Validation logic
         if chain_meta is None or not isinstance(chain_meta, dict):
-             # If "chain" key is missing or invalid (e.g. string), we fall back ONLY if "events" exists (legacy support)
-             if "events" in d:
-                 chain_meta = {}
-             else:
-                 raise ValueError("Invalid chain format: missing 'chain' or 'events' keys")
+            # If "chain" key is missing or invalid (e.g. string), we fall back ONLY if "events" exists (legacy support)
+            if "events" in d:
+                chain_meta = {}
+            else:
+                raise ValueError("Invalid chain format: missing 'chain' or 'events' keys")
 
         return cls(
             id=chain_meta.get("id", "unknown"),
-            version=d.get("lctl", "4.0"),
+            version=d.get("lctl", CURRENT_VERSION),
             events=[Event.from_dict(e) for e in d.get("events", [])]
         )
 

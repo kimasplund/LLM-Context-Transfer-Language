@@ -9,6 +9,7 @@ from click.testing import CliRunner
 
 from lctl.cli.main import cli, _estimate_cost
 from lctl.core.events import Chain, Event, EventType
+from lctl.core.schema import CURRENT_VERSION
 from lctl.evaluation.metrics import ChainMetrics
 
 
@@ -210,7 +211,7 @@ class TestStatsCommand:
 
         assert result.exit_code == 0
         assert "Chain: cli-test-chain" in result.output
-        assert "Version: 4.0" in result.output
+        assert f"Version: {CURRENT_VERSION}" in result.output
         assert "Events: 7" in result.output
         assert "Agents:" in result.output
         assert "Facts: 1" in result.output
@@ -224,7 +225,7 @@ class TestStatsCommand:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["chain_id"] == "cli-test-chain"
-        assert data["version"] == "4.0"
+        assert data["version"] == CURRENT_VERSION
         assert data["events"] == 7
         assert "tokens" in data
         assert "estimated_cost_usd" in data

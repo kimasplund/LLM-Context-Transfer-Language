@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from lctl.core.events import Chain, Event, EventType
+from lctl.core.schema import CURRENT_VERSION
 
 # Skip tests if FastAPI is not installed
 pytest.importorskip("fastapi")
@@ -23,7 +24,7 @@ def sample_chain_data():
     """Create sample chain data for testing."""
     base_time = datetime(2025, 1, 15, 10, 0, 0)
     return {
-        "lctl": "4.0",
+        "lctl": CURRENT_VERSION,
         "chain": {"id": "test-dashboard-chain"},
         "events": [
             {
@@ -156,7 +157,7 @@ class TestDashboardApp:
 
         # Check chain info
         assert data["chain"]["id"] == "test-dashboard-chain"
-        assert data["chain"]["version"] == "4.0"
+        assert data["chain"]["version"] == CURRENT_VERSION
         assert data["chain"]["filename"] == "test.lctl.json"
 
         # Check events
@@ -382,7 +383,7 @@ class TestDashboardEdgeCases:
 
     def test_empty_chain(self, tmp_path):
         """Test handling of empty chain."""
-        empty_chain = {"lctl": "4.0", "chain": {"id": "empty"}, "events": []}
+        empty_chain = {"lctl": CURRENT_VERSION, "chain": {"id": "empty"}, "events": []}
         chain_file = tmp_path / "empty.lctl.json"
         chain_file.write_text(json.dumps(empty_chain))
 
@@ -412,7 +413,7 @@ class TestDashboardEdgeCases:
         """Test chain with all event types."""
         base_time = datetime(2025, 1, 15, 10, 0, 0)
         chain_data = {
-            "lctl": "4.0",
+            "lctl": CURRENT_VERSION,
             "chain": {"id": "all-types"},
             "events": [
                 {"seq": 1, "type": "step_start", "timestamp": base_time.isoformat(),

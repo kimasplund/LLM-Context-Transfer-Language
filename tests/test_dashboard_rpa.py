@@ -21,6 +21,7 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from lctl.dashboard.app import create_app
+from lctl.core.schema import CURRENT_VERSION
 
 
 # =============================================================================
@@ -33,7 +34,7 @@ def rpa_sample_chain_data():
     """Create sample chain data optimized for RPA testing."""
     base_time = datetime(2025, 1, 15, 10, 0, 0)
     return {
-        "lctl": "4.0",
+        "lctl": CURRENT_VERSION,
         "chain": {"id": "rpa-test-chain"},
         "events": [
             {
@@ -126,7 +127,7 @@ def rpa_temp_chain_dir(rpa_sample_chain_data, tmp_path):
 
     # Create a third chain with no errors
     success_chain = {
-        "lctl": "4.0",
+        "lctl": CURRENT_VERSION,
         "chain": {"id": "success-chain"},
         "events": [
             {

@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from lctl.core.events import Chain, Event, EventType, ReplayEngine, State
+from lctl.core.schema import CURRENT_VERSION
 
 
 class TestEventType:
@@ -149,7 +150,7 @@ class TestChain:
         chain = Chain(id="test-chain-123")
         assert chain.id == "test-chain-123"
         assert chain.events == []
-        assert chain.version == "4.0"
+        assert chain.version == CURRENT_VERSION
 
     def test_chain_creation_with_custom_version(self):
         """Test chain creation with custom version."""
@@ -174,7 +175,7 @@ class TestChain:
         """Test chain serialization to dictionary."""
         result = sample_chain.to_dict()
 
-        assert result["lctl"] == "4.0"
+        assert result["lctl"] == CURRENT_VERSION
         assert result["chain"]["id"] == "test-chain"
         assert len(result["events"]) == 7
 
@@ -196,7 +197,7 @@ class TestChain:
         chain = Chain.from_dict(data)
 
         assert chain.id == "restored-chain"
-        assert chain.version == "4.0"
+        assert chain.version == CURRENT_VERSION
         assert len(chain.events) == 1
         assert chain.events[0].type == EventType.STEP_START
 
@@ -206,7 +207,7 @@ class TestChain:
         chain = Chain.from_dict(data)
 
         assert chain.id == "unknown"
-        assert chain.version == "4.0"
+        assert chain.version == CURRENT_VERSION
         assert chain.events == []
 
     def test_chain_save_json(self, sample_chain: Chain, tmp_path: Path):
@@ -216,7 +217,7 @@ class TestChain:
 
         assert file_path.exists()
         content = json.loads(file_path.read_text())
-        assert content["lctl"] == "4.0"
+        assert content["lctl"] == CURRENT_VERSION
         assert content["chain"]["id"] == "test-chain"
 
     def test_chain_save_yaml(self, sample_chain: Chain, tmp_path: Path):
@@ -226,7 +227,7 @@ class TestChain:
 
         assert file_path.exists()
         content = yaml.safe_load(file_path.read_text())
-        assert content["lctl"] == "4.0"
+        assert content["lctl"] == CURRENT_VERSION
         assert content["chain"]["id"] == "test-chain"
 
     def test_chain_save_yml_extension(self, sample_chain: Chain, tmp_path: Path):
@@ -243,7 +244,7 @@ class TestChain:
         chain = Chain.load(temp_chain_file)
 
         assert chain.id == "test-chain"
-        assert chain.version == "4.0"
+        assert chain.version == CURRENT_VERSION
         assert len(chain.events) == 7
 
     def test_chain_load_yaml(self, temp_yaml_chain_file: Path):
