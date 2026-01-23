@@ -22,7 +22,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 try:
     from agents import (
@@ -492,11 +492,14 @@ class LCTLTracingProcessor(TracingProcessor):
             pass
 
 
-class LCTLOpenAIAgentTracer:
+class LCTLOpenAIAgentTracer(BaseTracer):
     """Main tracer class for OpenAI Agents SDK integration.
 
     Provides convenient methods to trace agent runs with LCTL,
     supporting both sync and async execution modes.
+
+    Extends BaseTracer for standardized session management, thread safety,
+    and automatic stale entry cleanup.
 
     Example:
         tracer = LCTLOpenAIAgentTracer(chain_id="my-agent")
@@ -520,6 +523,9 @@ class LCTLOpenAIAgentTracer:
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
         verbose: bool = False,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ) -> None:
         """Initialize the OpenAI Agents SDK tracer.
 
@@ -527,10 +533,17 @@ class LCTLOpenAIAgentTracer:
             chain_id: Optional chain ID for the LCTL session.
             session: Optional existing LCTL session to use.
             verbose: Enable verbose output.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
         """
         _check_openai_agents_available()
 
-        self._session = session or LCTLSession(chain_id=chain_id or f"openai-agent-{str(uuid.uuid4())[:8]}")
+        super().__init__(
+            chain_id=chain_id or f"openai-agent-{str(uuid.uuid4())[:8]}",
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
         self._verbose = verbose
         self._hooks: Optional[LCTLRunHooks] = None
         self._tracing_processor: Optional[LCTLTracingProcessor] = None
@@ -541,16 +554,6 @@ class LCTLOpenAIAgentTracer:
             f"LCTLOpenAIAgentTracer(chain_id={self._session.chain.id!r}, "
             f"verbose={self._verbose})"
         )
-
-    @property
-    def session(self) -> LCTLSession:
-        """Access the LCTL session."""
-        return self._session
-
-    @property
-    def chain(self):
-        """Access the underlying LCTL chain."""
-        return self._session.chain
 
     def create_hooks(self) -> LCTLRunHooks:
         """Create run hooks for the tracer.
@@ -682,18 +685,10 @@ class LCTLOpenAIAgentTracer:
         Args:
             path: File path to export to (JSON or YAML).
         """
-        self._session.export(path)
+        super().export(path)
         if self._verbose:
-            event_count = len(self._session.chain.events)
+            event_count = len(self.chain.events)
             print(f"[LCTL] Exported {event_count} events to {path}")
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export the LCTL trace as a dictionary.
-
-        Returns:
-            The trace data as a dictionary.
-        """
-        return self._session.to_dict()
 
 
 class AgentRunContext:

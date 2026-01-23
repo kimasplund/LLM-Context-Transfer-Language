@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import TracerDelegate, truncate
 
 try:
     from llama_index.core.callbacks import CallbackManager
@@ -99,6 +99,9 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
     - Embedding generation
     - Errors
 
+    Uses TracerDelegate internally for standardized session management,
+    thread safety, and automatic stale entry cleanup.
+
     Example:
         callback = LCTLLlamaIndexCallback(chain_id="my-query")
         query_engine = index.as_query_engine(
@@ -112,24 +115,43 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
         self,
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ) -> None:
         """Initialize the callback handler.
 
         Args:
             chain_id: Optional chain ID for the LCTL session.
             session: Optional existing LCTL session to use.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
         """
         _check_llamaindex_available()
 
-        self.session = session or LCTLSession(chain_id=chain_id)
+        self._tracer = TracerDelegate(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
         self._event_stack: Dict[str, Dict[str, Any]] = {}
         self._query_depth = 0
-        self._lock = threading.Lock()
+
+    @property
+    def session(self) -> LCTLSession:
+        """Access the LCTL session."""
+        return self._tracer.session
 
     @property
     def chain(self):
         """Access the underlying LCTL chain."""
-        return self.session.chain
+        return self._tracer.chain
+
+    @property
+    def _lock(self) -> threading.Lock:
+        """Access the threading lock."""
+        return self._tracer.lock
 
     def get_callback_manager(self) -> "CallbackManager":
         """Get a CallbackManager configured with this handler.
@@ -146,11 +168,22 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
         Args:
             path: File path to export to (JSON or YAML).
         """
-        self.session.export(path)
+        self._tracer.export(path)
 
     def to_dict(self) -> Dict[str, Any]:
         """Export the LCTL chain as a dictionary."""
-        return self.session.to_dict()
+        return self._tracer.to_dict()
+
+    def cleanup_stale_entries(self, max_age_seconds: float = 3600.0) -> int:
+        """Remove stale event entries older than max_age_seconds.
+
+        Args:
+            max_age_seconds: Maximum age for entries (default 1 hour).
+
+        Returns:
+            Number of entries removed.
+        """
+        return self._tracer.cleanup_stale_entries(max_age_seconds)
 
     def _safe_session_call(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         """Safely call a session method with graceful degradation."""
@@ -161,7 +194,10 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             pass
 
     def _cleanup_stale_events(self, max_age_seconds: float = 3600.0) -> None:
-        """Clean up stale events from the event stack."""
+        """Clean up stale events from the event stack.
+
+        Note: This is a legacy method. Use cleanup_stale_entries() instead.
+        """
         current_time = time.time()
         with self._lock:
             stale_ids = [

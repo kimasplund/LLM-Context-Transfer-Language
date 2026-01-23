@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 try:
     import dspy
@@ -136,7 +136,7 @@ def _check_dspy_available() -> None:
         raise DSPyNotAvailableError()
 
 
-class LCTLDSPyCallback:
+class LCTLDSPyCallback(BaseTracer):
     """DSPy callback handler that records events to LCTL.
 
     Captures:
@@ -145,6 +145,9 @@ class LCTLDSPyCallback:
     - Predictions as facts
     - Optimization iterations as checkpoints
     - Errors
+
+    Extends BaseTracer for standardized session management, thread safety,
+    and automatic stale entry cleanup.
 
     Example:
         callback = LCTLDSPyCallback(chain_id="my-chain")
@@ -157,6 +160,9 @@ class LCTLDSPyCallback:
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
         verbose: bool = False,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ) -> None:
         """Initialize the callback handler.
 
@@ -164,21 +170,22 @@ class LCTLDSPyCallback:
             chain_id: Optional chain ID for the LCTL session.
             session: Optional existing LCTL session to use.
             verbose: Enable verbose output.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
         """
         _check_dspy_available()
 
-        self.session = session or LCTLSession(chain_id=chain_id or f"dspy-{str(uuid4())[:8]}")
+        super().__init__(
+            chain_id=chain_id or f"dspy-{str(uuid4())[:8]}",
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
         self._verbose = verbose
         self._active_modules: Dict[int, Dict[str, Any]] = {}
         self._llm_call_count = 0
         self._optimization_iteration = 0
         self._current_module: Optional[str] = None
-        self._lock = threading.Lock()
-
-    @property
-    def chain(self):
-        """Access the underlying LCTL chain."""
-        return self.session.chain
 
     def cleanup_stale_entries(self, max_age_seconds: float = 3600.0) -> int:
         """Remove module entries older than max_age_seconds.
@@ -194,6 +201,10 @@ class LCTLDSPyCallback:
         Returns:
             Number of entries removed.
         """
+        # Call parent cleanup for tracked_items
+        parent_count = super().cleanup_stale_entries(max_age_seconds)
+
+        # Also clean up active_modules
         now = time.time()
         with self._lock:
             stale_ids = [
@@ -202,7 +213,7 @@ class LCTLDSPyCallback:
             ]
             for module_id in stale_ids:
                 self._active_modules.pop(module_id, None)
-            return len(stale_ids)
+            return parent_count + len(stale_ids)
 
     @property
     def _module_stack(self) -> List[Dict[str, Any]]:

@@ -5,7 +5,7 @@ from .base import (
     check_availability,
     IntegrationNotAvailableError,
     BaseTracer,
-    TracerMixin,
+    TracerDelegate,
 )
 from .claude_code import (
     LCTLClaudeCodeTracer,
@@ -94,7 +94,7 @@ __all__ = [
     "check_availability",
     "IntegrationNotAvailableError",
     "BaseTracer",
-    "TracerMixin",
+    "TracerDelegate",
     # Claude Code integration
     "LCTLClaudeCodeTracer",
     "generate_claude_code_hooks",

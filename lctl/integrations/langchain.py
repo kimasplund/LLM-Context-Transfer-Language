@@ -18,7 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import UUID
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import TracerDelegate, truncate
 
 try:
     from langchain_core.agents import AgentAction, AgentFinish
@@ -72,6 +72,9 @@ class LCTLCallbackHandler(BaseCallbackHandler):
     - Agent actions
     - Errors
 
+    Uses TracerDelegate internally for standardized session management,
+    thread safety, and automatic stale entry cleanup.
+
     Example:
         handler = LCTLCallbackHandler(chain_id="my-chain")
         result = chain.invoke(
@@ -85,12 +88,17 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         self,
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ) -> None:
         """Initialize the callback handler.
 
         Args:
             chain_id: Optional chain ID for the LCTL session.
             session: Optional existing LCTL session to use.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
         """
         if not LANGCHAIN_AVAILABLE:
             raise ImportError(
@@ -98,12 +106,26 @@ class LCTLCallbackHandler(BaseCallbackHandler):
             )
 
         super().__init__()
-        self.session = session or LCTLSession(chain_id=chain_id)
+        self._tracer = TracerDelegate(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
 
-        self._lock = threading.Lock()
         self._run_stack: Dict[UUID, Dict[str, Any]] = {}
         self._chain_depth = 0
         self._monotonic_offset = time.time() - time.monotonic()
+
+    @property
+    def session(self) -> LCTLSession:
+        """Access the LCTL session."""
+        return self._tracer.session
+
+    @property
+    def _lock(self) -> threading.Lock:
+        """Access the threading lock."""
+        return self._tracer.lock
 
     def cleanup_stale_runs(self, max_age_seconds: float = 3600) -> None:
         """Remove run entries older than max_age_seconds.
@@ -124,10 +146,24 @@ class LCTLCallbackHandler(BaseCallbackHandler):
             for run_id in stale_ids:
                 self._run_stack.pop(run_id, None)
 
+    def cleanup_stale_entries(self, max_age_seconds: float = 3600.0) -> int:
+        """Remove stale entries from both run stack and delegate.
+
+        Args:
+            max_age_seconds: Maximum age for entries (default 1 hour).
+
+        Returns:
+            Number of entries removed.
+        """
+        # Clean up run stack
+        self.cleanup_stale_runs(max_age_seconds)
+        # Delegate cleanup
+        return self._tracer.cleanup_stale_entries(max_age_seconds)
+
     @property
     def chain(self):
         """Access the underlying LCTL chain."""
-        return self.session.chain
+        return self._tracer.chain
 
     def export(self, path: str) -> None:
         """Export the LCTL chain to a file.
@@ -135,11 +171,11 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         Args:
             path: File path to export to (JSON or YAML).
         """
-        self.session.export(path)
+        self._tracer.export(path)
 
     def to_dict(self) -> Dict[str, Any]:
         """Export the LCTL chain as a dictionary."""
-        return self.session.to_dict()
+        return self._tracer.to_dict()
 
     def _get_agent_name(self, serialized: Dict[str, Any], default: str = "langchain") -> str:
         """Extract agent name from serialized data."""

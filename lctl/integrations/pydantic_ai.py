@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, Optional
 from unittest.mock import MagicMock
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 try:
     from pydantic_ai import Agent
@@ -37,11 +37,14 @@ if TYPE_CHECKING:
     from pydantic_ai.run import AgentRunResult
 
 
-class LCTLPydanticAITracer:
+class LCTLPydanticAITracer(BaseTracer):
     """Tracer for PydanticAI agents.
 
     Captures agent execution, tool calls, and LLM interactions
     as LCTL events for debugging and analysis.
+
+    Extends BaseTracer for standardized session management, thread safety,
+    and automatic stale entry cleanup.
 
     Example:
         tracer = LCTLPydanticAITracer(chain_id="my-agent")
@@ -54,6 +57,9 @@ class LCTLPydanticAITracer:
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
         verbose: bool = False,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ):
         """Initialize the tracer.
 
@@ -61,6 +67,8 @@ class LCTLPydanticAITracer:
             chain_id: Optional chain ID for the LCTL session.
             session: Optional existing LCTL session to use.
             verbose: Whether to enable verbose logging.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
 
         Raises:
             ImportError: If PydanticAI is not installed.
@@ -69,30 +77,13 @@ class LCTLPydanticAITracer:
             raise ImportError(
                 "PydanticAI is not installed. Install with: pip install lctl[pydantic-ai]"
             )
-        self._lock = threading.Lock()
-        self.session = session or LCTLSession(chain_id=chain_id)
+        super().__init__(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
         self._verbose = verbose
-
-    @property
-    def chain(self):
-        """Access the underlying LCTL chain."""
-        return self.session.chain
-
-    def export(self, path: str) -> None:
-        """Export the LCTL chain to a file.
-
-        Args:
-            path: File path to export to (JSON or YAML).
-        """
-        self.session.export(path)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export the LCTL chain as a dictionary.
-
-        Returns:
-            Dictionary representation of the chain.
-        """
-        return self.session.to_dict()
 
 
 class TracedAgent:

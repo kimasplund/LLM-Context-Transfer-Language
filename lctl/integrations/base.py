@@ -162,17 +162,63 @@ class BaseTracer(ABC):
             self._tracked_items.pop(item_id, None)
 
 
-class TracerMixin:
-    """Mixin providing standard tracer methods for callback-style integrations.
+class TracerDelegate:
+    """Delegate class for callback-based integrations that can't inherit from BaseTracer.
 
-    Use this when the integration uses callbacks rather than wrapping.
+    Use this when the integration must extend a framework's callback class
+    but still needs BaseTracer functionality via composition.
+
+    Example:
+        class MyCallbackHandler(FrameworkCallback):
+            def __init__(self, chain_id=None, session=None):
+                super().__init__()
+                self._tracer = TracerDelegate(chain_id=chain_id, session=session)
+
+            @property
+            def session(self):
+                return self._tracer.session
+
+            def export(self, path):
+                self._tracer.export(path)
     """
-    _session: LCTLSession
+
+    def __init__(
+        self,
+        chain_id: Optional[str] = None,
+        session: Optional[LCTLSession] = None,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0
+    ):
+        """Initialize the delegate.
+
+        Args:
+            chain_id: Optional chain ID for new session
+            session: Optional existing session to use
+            auto_cleanup: Whether to auto-cleanup stale entries
+            cleanup_interval: Cleanup interval in seconds (default 1 hour)
+        """
+        self._session = session or LCTLSession(chain_id=chain_id)
+        self._lock = threading.Lock()
+        self._auto_cleanup = auto_cleanup
+        self._cleanup_interval = cleanup_interval
+        self._last_cleanup = time.time()
+        self._tracked_items: Dict[str, float] = {}
+
+    @property
+    def session(self) -> LCTLSession:
+        """Get the LCTL session."""
+        return self._session
 
     @property
     def chain(self):
         """Get the underlying chain."""
         return self._session.chain
+
+    @property
+    def lock(self) -> threading.Lock:
+        """Get the threading lock for thread-safe operations."""
+        return self._lock
 
     def export(self, path: str) -> None:
         """Export the trace to a file."""
@@ -182,11 +228,65 @@ class TracerMixin:
         """Convert the trace to a dictionary."""
         return self._session.to_dict()
 
+    def _should_cleanup(self) -> bool:
+        """Check if cleanup should run."""
+        if not self._auto_cleanup:
+            return False
+        return time.time() - self._last_cleanup >= self._cleanup_interval
+
+    def cleanup_stale_entries(self, max_age_seconds: float = 3600.0) -> int:
+        """Remove entries older than max_age_seconds.
+
+        Args:
+            max_age_seconds: Maximum age for entries (default 1 hour)
+
+        Returns:
+            Number of entries removed
+        """
+        now = time.time()
+        self._last_cleanup = now
+
+        with self._lock:
+            stale = [
+                key for key, ts in self._tracked_items.items()
+                if now - ts > max_age_seconds
+            ]
+            for key in stale:
+                del self._tracked_items[key]
+            return len(stale)
+
+    def maybe_cleanup(self) -> None:
+        """Run cleanup if interval has passed."""
+        if self._should_cleanup():
+            self.cleanup_stale_entries(self._cleanup_interval)
+
+    def track_item(self, item_id: str) -> None:
+        """Track an item with current timestamp."""
+        with self._lock:
+            self._tracked_items[item_id] = time.time()
+
+    def untrack_item(self, item_id: str) -> None:
+        """Stop tracking an item."""
+        with self._lock:
+            self._tracked_items.pop(item_id, None)
+
+    def get_tracked_item(self, item_id: str) -> Optional[float]:
+        """Get the timestamp for a tracked item.
+
+        Args:
+            item_id: The item ID to look up
+
+        Returns:
+            Timestamp when item was tracked, or None if not found
+        """
+        with self._lock:
+            return self._tracked_items.get(item_id)
+
 
 __all__ = [
     "truncate",
     "check_availability",
     "IntegrationNotAvailableError",
     "BaseTracer",
-    "TracerMixin",
+    "TracerDelegate",
 ]

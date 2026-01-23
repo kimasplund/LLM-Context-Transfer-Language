@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 # Try to import CrewAI - graceful degradation if not available
 try:

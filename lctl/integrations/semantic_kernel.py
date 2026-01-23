@@ -15,7 +15,7 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 try:
     # Check availability - import used for availability check
@@ -47,14 +47,21 @@ def _check_sk_available() -> None:
         raise SemanticKernelNotAvailableError()
 
 
-class LCTLSemanticKernelTracer:
-    """Tracer for Semantic Kernel."""
+class LCTLSemanticKernelTracer(BaseTracer):
+    """Tracer for Semantic Kernel.
+
+    Extends BaseTracer for standardized session management, thread safety,
+    and automatic stale entry cleanup.
+    """
 
     def __init__(
         self,
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
         verbose: bool = False,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ):
         """Initialize tracer.
 
@@ -62,27 +69,19 @@ class LCTLSemanticKernelTracer:
             chain_id: Optional unique identifier for the trace chain
             session: Optional existing LCTLSession
             verbose: Enable verbose logging
+            auto_cleanup: Whether to auto-cleanup stale entries
+            cleanup_interval: Cleanup interval in seconds (default 1 hour)
         """
         _check_sk_available()
-        self._lock = threading.Lock()
-        self.session = session or LCTLSession(
-            chain_id=chain_id or f"sk-{id(self)}"
+        super().__init__(
+            chain_id=chain_id or f"sk-{id(self)}",
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
         )
         self._verbose = verbose
         self._logger = logging.getLogger(__name__)
         self._traced_kernels: set = set()  # Track kernels to prevent double-tracing
-
-    @property
-    def chain(self):
-        return self.session.chain
-
-    def export(self, path: str) -> None:
-        """Export the LCTL chain to a file."""
-        self.session.export(path)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export the LCTL chain as a dictionary."""
-        return self.session.to_dict()
 
     def trace_kernel(self, kernel: Kernel) -> Kernel:
         """Attach tracing to a Semantic Kernel instance.

@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
-from .base import truncate
+from .base import BaseTracer, truncate
 
 # Metadata for availability
 AUTOGEN_MODE = "none"  # none, legacy, modern
@@ -208,40 +208,50 @@ class LCTLAutogenHandler(logging.Handler):
                 pass  # Graceful degradation
 
 
-class LCTLAutogenCallback:
+class LCTLAutogenCallback(BaseTracer):
     """AutoGen callback handler that records events to LCTL.
 
     Supports both Legacy (hooks) and Modern (event logging) AutoGen.
     Thread-safe for concurrent agent operations.
+
+    Extends BaseTracer for standardized session management, thread safety,
+    and automatic stale entry cleanup.
     """
 
     def __init__(
         self,
         chain_id: Optional[str] = None,
         session: Optional[LCTLSession] = None,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
     ) -> None:
-        """Initialize the callback handler."""
+        """Initialize the callback handler.
+
+        Args:
+            chain_id: Optional chain ID for the LCTL session.
+            session: Optional existing LCTL session to use.
+            auto_cleanup: Whether to auto-cleanup stale entries.
+            cleanup_interval: Cleanup interval in seconds (default 1 hour).
+        """
         _check_autogen_available()
 
-        self.session = session or LCTLSession(chain_id=chain_id)
+        super().__init__(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
         self._attached_agents: List[Any] = []
         self._conversation_stack: List[Dict[str, Any]] = []
         self._nested_depth = 0
         self._logging_handler: Optional[LCTLAutogenHandler] = None
-
-        # Thread safety locks
-        self._lock = threading.Lock()
 
         # Track active steps for proper step_start/step_end pairing
         self._active_steps: Dict[str, Dict[str, Any]] = {}
 
         if AUTOGEN_MODE == "modern":
             self._setup_modern_tracing()
-
-    @property
-    def chain(self):
-        """Access the underlying LCTL chain."""
-        return self.session.chain
 
     def _setup_modern_tracing(self) -> None:
         """Setup global logging handler for Modern AutoGen."""
@@ -560,15 +570,6 @@ class LCTLAutogenCallback:
             )
         except Exception:
             pass  # Graceful degradation
-
-    def export(self, path: str) -> None:
-        """Export the LCTL chain to a file."""
-        self.session.export(path)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Export session to dict."""
-        return self.session.to_dict()
-
 
 # Convenience wrappers
 

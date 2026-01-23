@@ -17,7 +17,7 @@ from lctl.core.session import LCTLSession
 from lctl.integrations.base import (
     BaseTracer,
     IntegrationNotAvailableError,
-    TracerMixin,
+    TracerDelegate,
     check_availability,
     truncate,
 )
@@ -475,74 +475,149 @@ class TestBaseTracer:
 
 
 # =============================================================================
-# Test: TracerMixin class
+# Test: TracerDelegate class
 # =============================================================================
 
 
-class ConcreteTracerMixin(TracerMixin):
-    """Concrete implementation of TracerMixin for testing."""
+class TestTracerDelegate:
+    """Tests for TracerDelegate class.
 
-    def __init__(self, session: LCTLSession):
-        self._session = session
-
-
-class TestTracerMixin:
-    """Tests for TracerMixin class.
-
-    Covers lines: 175, 179, 183
+    TracerDelegate provides BaseTracer functionality via composition for
+    callback-based integrations that can't inherit from BaseTracer.
     """
+
+    def test_init_with_chain_id(self):
+        """Test initialization with chain_id creates new session."""
+        delegate = TracerDelegate(chain_id="delegate-chain-test")
+
+        assert delegate.session is not None
+        assert delegate.session.chain.id == "delegate-chain-test"
+        assert delegate.lock is not None
+        assert delegate._auto_cleanup is True
+        assert delegate._cleanup_interval == 3600.0
+
+    def test_init_with_existing_session(self):
+        """Test initialization with existing session uses that session."""
+        existing_session = LCTLSession(chain_id="existing-session")
+        delegate = TracerDelegate(session=existing_session)
+
+        assert delegate.session is existing_session
+        assert delegate.session.chain.id == "existing-session"
 
     def test_chain_property(self):
         """Test chain property returns session's chain."""
-        session = LCTLSession(chain_id="mixin-chain-test")
-        mixin = ConcreteTracerMixin(session)
+        delegate = TracerDelegate(chain_id="delegate-chain-test")
 
-        assert mixin.chain is session.chain
-        assert mixin.chain.id == "mixin-chain-test"
+        assert delegate.chain is delegate.session.chain
+        assert delegate.chain.id == "delegate-chain-test"
+
+    def test_lock_property(self):
+        """Test lock property returns threading lock."""
+        delegate = TracerDelegate(chain_id="lock-test")
+
+        assert delegate.lock is not None
+        assert isinstance(delegate.lock, type(threading.Lock()))
 
     def test_export_delegates_to_session(self, tmp_path: Path):
         """Test export() delegates to session.export()."""
-        session = LCTLSession(chain_id="mixin-export-test")
-        session.add_fact("F1", "Test fact")
-        mixin = ConcreteTracerMixin(session)
+        delegate = TracerDelegate(chain_id="delegate-export-test")
+        delegate.session.add_fact("F1", "Test fact")
 
-        export_path = tmp_path / "mixin_export.lctl.json"
-        mixin.export(str(export_path))
+        export_path = tmp_path / "delegate_export.lctl.json"
+        delegate.export(str(export_path))
 
         assert export_path.exists()
         data = json.loads(export_path.read_text())
-        assert data["chain"]["id"] == "mixin-export-test"
+        assert data["chain"]["id"] == "delegate-export-test"
 
     def test_to_dict_delegates_to_session(self):
         """Test to_dict() delegates to session.to_dict()."""
-        session = LCTLSession(chain_id="mixin-dict-test")
-        session.step_start("agent", "action")
-        mixin = ConcreteTracerMixin(session)
+        delegate = TracerDelegate(chain_id="delegate-dict-test")
+        delegate.session.step_start("agent", "action")
 
-        result = mixin.to_dict()
+        result = delegate.to_dict()
 
-        assert result["chain"]["id"] == "mixin-dict-test"
+        assert result["chain"]["id"] == "delegate-dict-test"
         assert len(result["events"]) == 1
 
-    def test_mixin_with_events(self, tmp_path: Path):
-        """Test mixin export/to_dict with multiple events."""
-        session = LCTLSession(chain_id="mixin-events-test")
-        session.step_start("planner", "plan")
-        session.add_fact("F1", "Planning complete", confidence=0.9)
-        session.tool_call("search", {"q": "test"}, {"results": []}, duration_ms=100)
-        session.step_end()
-
-        mixin = ConcreteTracerMixin(session)
+    def test_delegate_with_events(self, tmp_path: Path):
+        """Test delegate export/to_dict with multiple events."""
+        delegate = TracerDelegate(chain_id="delegate-events-test")
+        delegate.session.step_start("planner", "plan")
+        delegate.session.add_fact("F1", "Planning complete", confidence=0.9)
+        delegate.session.tool_call("search", {"q": "test"}, {"results": []}, duration_ms=100)
+        delegate.session.step_end()
 
         # Test to_dict
-        result = mixin.to_dict()
+        result = delegate.to_dict()
         assert len(result["events"]) == 4
 
         # Test export
-        export_path = tmp_path / "mixin_multi.lctl.json"
-        mixin.export(str(export_path))
+        export_path = tmp_path / "delegate_multi.lctl.json"
+        delegate.export(str(export_path))
         data = json.loads(export_path.read_text())
         assert len(data["events"]) == 4
+
+    def test_track_item(self):
+        """Test track_item adds item with timestamp."""
+        delegate = TracerDelegate(chain_id="track-test")
+
+        before = time.time()
+        delegate.track_item("test_item")
+        after = time.time()
+
+        ts = delegate.get_tracked_item("test_item")
+        assert ts is not None
+        assert before <= ts <= after
+
+    def test_untrack_item(self):
+        """Test untrack_item removes tracked item."""
+        delegate = TracerDelegate(chain_id="untrack-test")
+        delegate.track_item("to_remove")
+
+        delegate.untrack_item("to_remove")
+
+        assert delegate.get_tracked_item("to_remove") is None
+
+    def test_cleanup_stale_entries(self):
+        """Test cleanup_stale_entries removes old items."""
+        delegate = TracerDelegate(chain_id="cleanup-test")
+
+        # Add items with artificial timestamps
+        now = time.time()
+        delegate._tracked_items = {
+            "old": now - 4000,  # Older than 3600s
+            "new": now - 100,   # Newer than 3600s
+        }
+
+        removed = delegate.cleanup_stale_entries(max_age_seconds=3600.0)
+
+        assert removed == 1
+        assert "old" not in delegate._tracked_items
+        assert "new" in delegate._tracked_items
+
+    def test_maybe_cleanup(self):
+        """Test maybe_cleanup runs when interval passed."""
+        delegate = TracerDelegate(cleanup_interval=0.001)
+        now = time.time()
+        delegate._tracked_items = {"old": now - 1}
+
+        time.sleep(0.01)
+        delegate.maybe_cleanup()
+
+        assert "old" not in delegate._tracked_items
+
+    def test_auto_cleanup_disabled(self):
+        """Test auto_cleanup can be disabled."""
+        delegate = TracerDelegate(auto_cleanup=False, cleanup_interval=0.001)
+        now = time.time()
+        delegate._tracked_items = {"item": now - 1}
+
+        time.sleep(0.01)
+        delegate.maybe_cleanup()
+
+        # Item should still exist since auto_cleanup is disabled
+        assert "item" in delegate._tracked_items
 
 
 # =============================================================================
