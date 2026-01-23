@@ -35,15 +35,16 @@ lctl/
 │   └── app.py           # FastAPI web dashboard
 └── integrations/
     ├── __init__.py      # Integration exports
+    ├── base.py          # BaseTracer, TracerDelegate, truncate, check_availability
     ├── claude_code.py   # LCTLClaudeCodeTracer, generate_hooks (SELF-TRACING!)
-    ├── langchain.py     # LCTLCallbackHandler, LCTLChain, trace_chain
+    ├── langchain.py     # LCTLCallbackHandler (TracerDelegate), LCTLChain, trace_chain
     ├── crewai.py        # LCTLCrew, LCTLAgent, LCTLTask, trace_crew
-    ├── autogen.py       # LCTLAutogenCallback, trace_agent, trace_group_chat
-    ├── openai_agents.py # LCTLOpenAIAgentTracer, LCTLRunHooks, TracedAgent
-    ├── pydantic_ai.py   # LCTLPydanticAITracer, TracedAgent, trace_agent
-    ├── semantic_kernel.py # LCTLSemanticKernelTracer, trace_kernel
-    ├── dspy.py          # LCTLDSPyCallback, TracedDSPyModule, trace_module
-    └── llamaindex.py    # LCTLLlamaIndexCallback, trace_query_engine
+    ├── autogen.py       # LCTLAutogenCallback (BaseTracer), trace_agent, trace_group_chat
+    ├── openai_agents.py # LCTLOpenAIAgentTracer (BaseTracer), LCTLRunHooks, TracedAgent
+    ├── pydantic_ai.py   # LCTLPydanticAITracer (BaseTracer), TracedAgent, trace_agent
+    ├── semantic_kernel.py # LCTLSemanticKernelTracer (BaseTracer), trace_kernel
+    ├── dspy.py          # LCTLDSPyCallback (BaseTracer), TracedDSPyModule, trace_module
+    └── llamaindex.py    # LCTLLlamaIndexCallback (TracerDelegate), trace_query_engine
 ```
 
 ### Self-Tracing with Claude Code
@@ -301,34 +302,57 @@ event = Event(seq=1, type=EventType.STEP_START, ...)
 
 ### 2. Integration Pattern
 
-All integrations follow this structure:
+All integrations use one of two base class patterns from `lctl.integrations.base`:
 
+**Pattern A: BaseTracer inheritance** (for standalone tracers)
 ```python
-# 1. Check availability
-try:
-    from framework import SomeClass
-    FRAMEWORK_AVAILABLE = True
-except ImportError:
-    FRAMEWORK_AVAILABLE = False
+from lctl.integrations.base import BaseTracer, IntegrationNotAvailableError
 
-# 2. Provide availability check
-def is_available() -> bool:
-    return FRAMEWORK_AVAILABLE
+class LCTLMyTracer(BaseTracer):
+    """Tracer that can directly inherit from BaseTracer."""
 
-# 3. Wrapper class with session
-class LCTLWrapper:
-    def __init__(self, chain_id=None, session=None):
+    def __init__(self, chain_id=None, session=None, *, auto_cleanup=True, cleanup_interval=3600.0):
         if not FRAMEWORK_AVAILABLE:
-            raise ImportError("Install with: pip install framework")
-        self.session = session or LCTLSession(chain_id=chain_id)
+            raise IntegrationNotAvailableError("MyFramework", "pip install myframework")
+        super().__init__(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
+
+    # Implement framework-specific hooks...
+    # Inherited: session, chain, export(), to_dict(), _track_item(), cleanup_stale_entries()
+```
+
+**Pattern B: TracerDelegate composition** (for callback-based integrations)
+```python
+from lctl.integrations.base import TracerDelegate
+
+class LCTLCallbackHandler(FrameworkBaseCallback):
+    """Callback handler that must extend framework class, uses composition."""
+
+    def __init__(self, chain_id=None, session=None, *, auto_cleanup=True, cleanup_interval=3600.0):
+        super().__init__()  # Framework's __init__
+        self._tracer = TracerDelegate(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
+
+    @property
+    def session(self):
+        return self._tracer.session
 
     def export(self, path: str):
-        self.session.export(path)
-
-# 4. Convenience function
-def trace_thing(thing, chain_id=None):
-    return LCTLWrapper(thing, chain_id=chain_id)
+        self._tracer.export(path)
 ```
+
+**Current integration patterns:**
+- BaseTracer: pydantic_ai, semantic_kernel, dspy, openai_agents, autogen
+- TracerDelegate: langchain, llamaindex (must extend framework callbacks)
+- Wrapper: crewai (wraps framework classes)
 
 ### 3. Error Handling Pattern
 
@@ -433,14 +457,15 @@ def test_invalid_file(runner, tmp_path):
 
 1. **Create integration file**: `lctl/integrations/newframework.py`
 
-2. **Follow the pattern**:
+2. **Choose the pattern** based on whether you can inherit from BaseTracer:
 
+**Option A: BaseTracer inheritance** (preferred when possible)
 ```python
 """NewFramework integration for LCTL."""
 
 from __future__ import annotations
-from typing import Any, Dict, Optional
-from ..core.session import LCTLSession
+from typing import Any, Optional
+from .base import BaseTracer, IntegrationNotAvailableError, truncate
 
 try:
     from newframework import Agent, Runner
@@ -453,31 +478,57 @@ except ImportError:
 def is_available() -> bool:
     return NEWFRAMEWORK_AVAILABLE
 
-class LCTLNewFrameworkTracer:
-    def __init__(self, chain_id: Optional[str] = None, session: Optional[LCTLSession] = None):
+class LCTLNewFrameworkTracer(BaseTracer):
+    def __init__(
+        self,
+        chain_id: Optional[str] = None,
+        session: Optional["LCTLSession"] = None,
+        *,
+        auto_cleanup: bool = True,
+        cleanup_interval: float = 3600.0,
+    ):
         if not NEWFRAMEWORK_AVAILABLE:
-            raise ImportError("Install with: pip install newframework")
-        self.session = session or LCTLSession(chain_id=chain_id)
+            raise IntegrationNotAvailableError("NewFramework", "pip install newframework")
+        super().__init__(
+            chain_id=chain_id,
+            session=session,
+            auto_cleanup=auto_cleanup,
+            cleanup_interval=cleanup_interval,
+        )
 
     # Implement framework-specific hooks
     def on_agent_start(self, agent: Agent):
         agent_name = getattr(agent, "name", "agent")
+        self._track_item(agent_name)  # Track for cleanup
         self.session.step_start(agent_name, "execute", "")
 
     def on_agent_end(self, agent: Agent, result: Any):
         agent_name = getattr(agent, "name", "agent")
+        self._untrack_item(agent_name)
         self.session.step_end(agent_name, outcome="success")
+        self._maybe_cleanup()  # Periodic cleanup
+
+__all__ = ["NEWFRAMEWORK_AVAILABLE", "LCTLNewFrameworkTracer", "is_available"]
+```
+
+**Option B: TracerDelegate composition** (when extending framework callbacks)
+```python
+from .base import TracerDelegate, IntegrationNotAvailableError
+
+class LCTLNewFrameworkCallback(FrameworkBaseCallback):
+    def __init__(self, chain_id=None, session=None, *, auto_cleanup=True, cleanup_interval=3600.0):
+        super().__init__()  # Framework's __init__
+        self._tracer = TracerDelegate(
+            chain_id=chain_id, session=session,
+            auto_cleanup=auto_cleanup, cleanup_interval=cleanup_interval,
+        )
+
+    @property
+    def session(self):
+        return self._tracer.session
 
     def export(self, path: str):
-        self.session.export(path)
-
-def trace_agent(agent: Agent, chain_id: Optional[str] = None) -> LCTLNewFrameworkTracer:
-    """Convenience function to trace an agent."""
-    tracer = LCTLNewFrameworkTracer(chain_id=chain_id)
-    # Attach tracer to agent
-    return tracer
-
-__all__ = ["NEWFRAMEWORK_AVAILABLE", "LCTLNewFrameworkTracer", "trace_agent", "is_available"]
+        self._tracer.export(path)
 ```
 
 3. **Update integrations/__init__.py**:
