@@ -10,14 +10,16 @@ Requires:
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
 from ..core.session import LCTLSession
 
 try:
-    # Check availability
-    import semantic_kernel  # noqa: F401
+    # Check availability - import used for availability check
+    import semantic_kernel as _sk  # noqa: F401
+    del _sk  # Remove from namespace after check
     # Use direct imports from filters package for better compatibility
     from semantic_kernel.filters import (
         FilterTypes, 
@@ -68,6 +70,7 @@ class LCTLSemanticKernelTracer:
             verbose: Enable verbose logging
         """
         _check_sk_available()
+        self._lock = threading.Lock()
         self.session = session or LCTLSession(
             chain_id=chain_id or f"sk-{id(self)}"
         )
@@ -93,11 +96,11 @@ class LCTLSemanticKernelTracer:
         Adds filters to the kernel.
         """
         kernel_id = id(kernel)
-        if kernel_id in self._traced_kernels:
-            self._logger.warning("Kernel already traced, skipping to prevent double-tracing")
-            return kernel
-
-        self._traced_kernels.add(kernel_id)
+        with self._lock:
+            if kernel_id in self._traced_kernels:
+                self._logger.warning("Kernel already traced, skipping to prevent double-tracing")
+                return kernel
+            self._traced_kernels.add(kernel_id)
         kernel.add_filter(FilterTypes.FUNCTION_INVOCATION, self._function_invocation_filter)
         kernel.add_filter(FilterTypes.PROMPT_RENDERING, self._prompt_render_filter)
         return kernel
@@ -106,25 +109,28 @@ class LCTLSemanticKernelTracer:
         """Filter for prompt rendering."""
         # Execute render
         await next(context)
-        
+
         # Capture rendered prompt
         if context.rendered_prompt:
             function_name = context.function.name
             plugin_name = context.function.plugin_name or "Global"
             full_name = f"{plugin_name}.{function_name}"
-            
+
             # Record as a fact or part of step?
             # Since render happens before invocation filter (usually), or as part of it.
             # We can log it as a fact associated with the function.
             # Or use 'tool_call' semantics? No, prompt is internal.
             # Adding as a high-confidence fact about the agent's "thought" process.
-            
-            self.session.add_fact(
-                fact_id=f"prompt-{full_name}-{hash(context.rendered_prompt)}",
-                text=f"Rendered Prompt for {full_name}: {context.rendered_prompt}",
-                confidence=1.0,
-                source="sk-prompt-filter"
-            )
+
+            try:
+                self.session.add_fact(
+                    fact_id=f"prompt-{full_name}-{hash(context.rendered_prompt)}",
+                    text=f"Rendered Prompt for {full_name}: {context.rendered_prompt}",
+                    confidence=1.0,
+                    source="sk-prompt-filter"
+                )
+            except Exception:
+                pass  # Don't break execution if tracing fails
 
     async def _function_invocation_filter(self, context: FunctionInvocationContext, next: Callable[..., Any]):
         """Filter for function invocations."""
@@ -137,11 +143,14 @@ class LCTLSemanticKernelTracer:
         # Summarize inputs
         input_summary = _truncate(str(context.arguments))
 
-        self.session.step_start(
-            agent=full_name,
-            intent="execute_function",
-            input_summary=input_summary
-        )
+        try:
+            self.session.step_start(
+                agent=full_name,
+                intent="execute_function",
+                input_summary=input_summary
+            )
+        except Exception:
+            pass  # Don't break execution if tracing fails
 
         start_time = time.time()
 
@@ -188,29 +197,38 @@ class LCTLSemanticKernelTracer:
                         # Stream finished successfully
                         stream_completed = True
                         duration_ms = int((time.time() - stream_start_time) * 1000)
-                        self.session.step_end(
-                            agent=full_name,
-                            outcome="success",
-                            output_summary=_truncate(accumulated_content),
-                            duration_ms=duration_ms,
-                            tokens_in=tokens_in,
-                            tokens_out=tokens_out
-                        )
+                        try:
+                            self.session.step_end(
+                                agent=full_name,
+                                outcome="success",
+                                output_summary=_truncate(accumulated_content),
+                                duration_ms=duration_ms,
+                                tokens_in=tokens_in,
+                                tokens_out=tokens_out
+                            )
+                        except Exception:
+                            pass  # Don't break execution if tracing fails
 
                     except Exception as e:
                         # Stream error
-                        self.session.error(
-                            category="execution_error",
-                            error_type=type(e).__name__,
-                            message=str(e),
-                            recoverable=False
-                        )
+                        try:
+                            self.session.error(
+                                category="execution_error",
+                                error_type=type(e).__name__,
+                                message=str(e),
+                                recoverable=False
+                            )
+                        except Exception:
+                            pass  # Don't break execution if tracing fails
                         duration_ms = int((time.time() - stream_start_time) * 1000)
-                        self.session.step_end(
-                            agent=full_name,
-                            outcome="error",
-                            duration_ms=duration_ms
-                        )
+                        try:
+                            self.session.step_end(
+                                agent=full_name,
+                                outcome="error",
+                                duration_ms=duration_ms
+                            )
+                        except Exception:
+                            pass  # Don't break execution if tracing fails
                         raise
                     finally:
                         # Ensure step_end is called even if stream is abandoned
@@ -254,29 +272,38 @@ class LCTLSemanticKernelTracer:
                     elif isinstance(usage, dict):
                         tokens_out = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
 
-            self.session.step_end(
-                agent=full_name,
-                outcome="success",
-                output_summary=output_summary,
-                duration_ms=duration_ms,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out
-            )
+            try:
+                self.session.step_end(
+                    agent=full_name,
+                    outcome="success",
+                    output_summary=output_summary,
+                    duration_ms=duration_ms,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out
+                )
+            except Exception:
+                pass  # Don't break execution if tracing fails
 
         except Exception as e:
             # 4. Step End (Error) - only catches sync/setup errors, stream errors caught in wrapper
             duration_ms = int((time.time() - start_time) * 1000)
-            self.session.error(
-                category="execution_error",
-                error_type=type(e).__name__,
-                message=str(e),
-                recoverable=False
-            )
-            self.session.step_end(
-                agent=full_name,
-                outcome="error",
-                duration_ms=duration_ms
-            )
+            try:
+                self.session.error(
+                    category="execution_error",
+                    error_type=type(e).__name__,
+                    message=str(e),
+                    recoverable=False
+                )
+            except Exception:
+                pass  # Don't break execution if tracing fails
+            try:
+                self.session.step_end(
+                    agent=full_name,
+                    outcome="error",
+                    duration_ms=duration_ms
+                )
+            except Exception:
+                pass  # Don't break execution if tracing fails
             raise
 
 

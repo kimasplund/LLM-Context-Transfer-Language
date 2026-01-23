@@ -906,7 +906,7 @@ class LCTLClaudeCodeTracer:
             # Check for uncommitted changes in tracked files
             for fc in self._file_changes:
                 file_path = fc.get("file_path", "")
-                cmd = ["git", "-C", repo_path, "status", "--porcelain", file_path]
+                cmd = ["git", "-C", repo_path, "status", "--porcelain", "--", file_path]
                 output = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
                 if output.stdout.strip():
                     result["uncommitted_changes"].append({

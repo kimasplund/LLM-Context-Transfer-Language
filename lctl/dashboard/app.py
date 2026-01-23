@@ -1,7 +1,6 @@
 """LCTL Dashboard - FastAPI web application for chain visualization."""
 
 import asyncio
-import hashlib
 import hmac
 import json
 import os
@@ -15,7 +14,10 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Web
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from .. import __version__
 from ..core.events import Chain, ReplayEngine
@@ -37,7 +39,7 @@ class CompareRequest(BaseModel):
 
 class BatchMetricsRequest(BaseModel):
     """Request model for batch metrics endpoint."""
-    filenames: list[str]
+    filenames: list[str] = Field(..., max_length=100)
 
 
 class SearchRequest(BaseModel):
@@ -84,17 +86,24 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:*",
-            "http://127.0.0.1:*",
             "http://localhost:3000",
+            "http://localhost:5173",
             "http://localhost:8080",
             "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
             "http://127.0.0.1:8080",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
         ],
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_credentials=True,
+        allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Set up rate limiting
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Store working directory in app state
     app.state.working_dir = working_dir or Path.cwd()
@@ -127,11 +136,22 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         working_dir = app.state.working_dir.resolve()
         try:
             file_path = (working_dir / filename).resolve()
+
+            # Security: Check for symlinks pointing outside working dir
+            if file_path.is_symlink():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: Symbolic links not allowed"
+                )
+
             if not file_path.is_relative_to(working_dir):
-                raise HTTPException(status_code=403, detail="Access denied: Path outside working directory")
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: Path outside working directory"
+                )
             return file_path
-        except (ValueError, RuntimeError):
-             raise HTTPException(status_code=400, detail="Invalid filename")
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
 
     def get_cached_engine(file_path: Path) -> ReplayEngine:
         """Get ReplayEngine from cache or load it."""
@@ -379,10 +399,11 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.post("/api/compare", response_class=JSONResponse)
-    async def compare_chains(request: CompareRequest):
+    @limiter.limit("10/minute")
+    async def compare_chains(request: Request, compare_req: CompareRequest):  # noqa: ARG001
         """Compare two chains and return differences."""
-        path1 = get_secure_path(request.filename1)
-        path2 = get_secure_path(request.filename2)
+        path1 = get_secure_path(compare_req.filename1)
+        path2 = get_secure_path(compare_req.filename2)
 
         engine1 = get_cached_engine(path1)
         engine2 = get_cached_engine(path2)
@@ -613,7 +634,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
                             nonlocal filters
                             filters = message.get("filters", {})
                         elif msg_type == "unsubscribe":
-                            filters = {}
+                            filters = {}  # noqa: F841 - used via nonlocal
                         elif msg_type == "ping":
                             pong = {"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()}
                             await websocket.send_text(json.dumps(pong))
@@ -773,6 +794,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.post("/api/rpa/auth/generate-key", response_class=JSONResponse)
+    @limiter.limit("5/minute")
     async def rpa_generate_api_key(
         request: Request,
         _auth: bool = Depends(verify_api_key)
@@ -946,8 +968,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             return JSONResponse({"events": events, "chain_id": chain.id})
 
     @app.post("/api/rpa/batch/metrics", response_class=JSONResponse)
+    @limiter.limit("20/minute")
     async def rpa_batch_metrics(
-        request: BatchMetricsRequest,
+        request: Request,  # noqa: ARG001 - required by rate limiter
+        batch_req: BatchMetricsRequest,
         _auth: bool = Depends(verify_api_key)
     ):
         """Get metrics for multiple chains in one request.
@@ -957,7 +981,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         results = []
         errors = []
 
-        for filename in request.filenames:
+        for filename in batch_req.filenames:
             try:
                 file_path = get_secure_path(filename)
                 engine = get_cached_engine(file_path)
@@ -989,8 +1013,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         }
 
     @app.post("/api/rpa/search", response_class=JSONResponse)
+    @limiter.limit("30/minute")
     async def rpa_search(
-        request: SearchRequest,
+        request: Request,  # noqa: ARG001 - required by rate limiter
+        search_req: SearchRequest,
         _auth: bool = Depends(verify_api_key)
     ):
         """Search across all chains for specific events or patterns.
@@ -999,7 +1025,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         """
         working_dir = app.state.working_dir
         results = []
-        query_lower = request.query.lower()
+        query_lower = search_req.query.lower()
 
         for pattern in ["*.lctl.json", "*.lctl.yaml", "*.lctl.yml"]:
             for file_path in working_dir.glob(pattern):
@@ -1010,11 +1036,11 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
                         e_type = event.type.value if hasattr(event.type, 'value') else event.type
 
                         # Apply type filter
-                        if request.event_types and e_type not in request.event_types:
+                        if search_req.event_types and e_type not in search_req.event_types:
                             continue
 
                         # Apply agent filter
-                        if request.agents and event.agent not in request.agents:
+                        if search_req.agents and event.agent not in search_req.agents:
                             continue
 
                         # Search in event data
@@ -1037,20 +1063,20 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
                                 "preview": str(event.data)[:100] if event.data else ""
                             })
 
-                            if len(results) >= request.limit:
+                            if len(results) >= search_req.limit:
                                 break
 
                 except Exception:
                     continue
 
-                if len(results) >= request.limit:
+                if len(results) >= search_req.limit:
                     break
 
         return {
             "results": results,
             "total": len(results),
-            "query": request.query,
-            "truncated": len(results) >= request.limit
+            "query": search_req.query,
+            "truncated": len(results) >= search_req.limit
         }
 
     @app.post("/api/rpa/webhooks", response_class=JSONResponse)
@@ -1128,7 +1154,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     async def rpa_poll(
         filename: str,
         since_seq: int = Query(0, description="Return events after this sequence"),
-        timeout_ms: int = Query(0, description="Long-poll timeout (0 = immediate)"),
+        _timeout_ms: int = Query(0, description="Long-poll timeout (0 = immediate, reserved for future use)"),
         _auth: bool = Depends(verify_api_key)
     ):
         """Poll for new events (alternative to streaming for RPA).

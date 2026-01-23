@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from contextlib import asynccontextmanager
 from functools import wraps
@@ -82,6 +83,7 @@ class LCTLPydanticAITracer:
             raise ImportError(
                 "PydanticAI is not installed. Install with: pip install lctl[pydantic-ai]"
             )
+        self._lock = threading.Lock()
         self.session = session or LCTLSession(chain_id=chain_id)
         self._verbose = verbose
 

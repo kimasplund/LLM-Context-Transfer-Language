@@ -1,6 +1,7 @@
 """LCTL Event Sourcing Core - The foundation for time-travel debugging."""
 
 import bisect
+import copy
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -59,13 +60,24 @@ class Event:
         if missing:
             raise ValueError(f"Event missing required fields: {missing}")
 
+        # Validate seq
+        seq = d.get("seq")
+        if not isinstance(seq, int):
+            raise ValueError(f"seq must be int, got {type(seq).__name__}")
+        if seq < 1:
+            raise ValueError(f"seq must be positive, got {seq}")
+
+        # Validate timestamp
+        timestamp = d.get("timestamp")
+        if timestamp is None:
+            raise ValueError("timestamp cannot be None")
+
         # Parse type
         event_type = d["type"]
         if event_type in [e.value for e in EventType]:
             event_type = EventType(event_type)
 
         # Parse timestamp
-        timestamp = d["timestamp"]
         if isinstance(timestamp, str):
             try:
                 timestamp = datetime.fromisoformat(timestamp)
@@ -73,7 +85,7 @@ class Event:
                 raise ValueError(f"Invalid timestamp format '{d['timestamp']}': {e}")
 
         return cls(
-            seq=d["seq"],
+            seq=seq,
             type=event_type,
             timestamp=timestamp,
             agent=d["agent"],
@@ -101,6 +113,9 @@ class Chain:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Chain":
+        if not isinstance(d, dict):
+            raise ValueError(f"Expected dict, got {type(d).__name__}")
+
         chain_meta = d.get("chain")
 
         # Validation logic
@@ -251,11 +266,11 @@ class ReplayEngine:
         # Start from cached state or fresh
         if nearest_cached > 0:
             cached_state = self._state_cache[nearest_cached]
-            # Use shallow copies because apply_event uses copy-on-write for mutable internals
+            # Use deep copies for nested structures (facts contains dicts, errors is list of dicts)
             state = State(
-                facts=cached_state.facts.copy(),
-                metrics=cached_state.metrics.copy(),
-                errors=cached_state.errors.copy(),
+                facts=copy.deepcopy(cached_state.facts),
+                metrics=cached_state.metrics.copy(),  # Simple dict, shallow OK
+                errors=copy.deepcopy(cached_state.errors),  # List of dicts
                 current_agent=cached_state.current_agent,
                 current_step=cached_state.current_step
             )
@@ -336,36 +351,53 @@ class ReplayEngine:
 
         return diffs
 
-    def find_bottlenecks(self) -> List[Dict[str, Any]]:
-        """Analyze performance and find bottlenecks."""
-        step_durations = {}
+    def find_bottlenecks(self, threshold_ms: float = 0) -> List[Dict[str, Any]]:
+        """Find steps that took longer than threshold.
 
-        current_step = None
-        step_start_time = None
+        Uses a stack-based approach to correctly handle nested steps (LIFO matching).
+
+        Args:
+            threshold_ms: Minimum duration in milliseconds to be considered a bottleneck.
+                         Default 0 returns all steps.
+
+        Returns:
+            List of bottleneck steps sorted by duration (descending), with percentage
+            of total time for each step.
+        """
+        step_durations = []
+        step_stack = []  # Stack of {'agent': str, 'seq': int, 'start_time': datetime}
 
         for event in self.chain.events:
             if event.type == EventType.STEP_START:
-                current_step = (event.agent, event.seq)
-                step_start_time = event.timestamp
-            elif event.type == EventType.STEP_END and current_step:
-                duration = event.data.get("duration_ms", 0)
-                if duration == 0 and step_start_time:
-                    duration = (event.timestamp - step_start_time).total_seconds() * 1000
-                step_durations[current_step] = {
-                    "agent": current_step[0],
-                    "seq": current_step[1],
-                    "duration_ms": duration,
-                    "tokens": event.data.get("tokens", {})
-                }
-                current_step = None
+                step_stack.append({
+                    'agent': event.agent,
+                    'seq': event.seq,
+                    'start_time': event.timestamp
+                })
+            elif event.type == EventType.STEP_END and step_stack:
+                # Find matching start (same agent, LIFO)
+                for i in range(len(step_stack) - 1, -1, -1):
+                    if step_stack[i]['agent'] == event.agent:
+                        start_info = step_stack.pop(i)
+                        duration_ms = event.data.get('duration_ms', 0)
+                        if duration_ms == 0 and start_info['start_time']:
+                            duration_ms = (event.timestamp - start_info['start_time']).total_seconds() * 1000
+                        if duration_ms >= threshold_ms:
+                            step_durations.append({
+                                'agent': event.agent,
+                                'seq': start_info['seq'],
+                                'duration_ms': duration_ms,
+                                'tokens': event.data.get('tokens', {})
+                            })
+                        break
 
         # Sort by duration
-        sorted_steps = sorted(step_durations.values(), key=lambda x: x["duration_ms"], reverse=True)
+        sorted_steps = sorted(step_durations, key=lambda x: x['duration_ms'], reverse=True)
 
         # Calculate percentages
-        total_duration = sum(s["duration_ms"] for s in sorted_steps)
+        total_duration = sum(s['duration_ms'] for s in sorted_steps)
         for step in sorted_steps:
-            step["percentage"] = (step["duration_ms"] / total_duration * 100) if total_duration > 0 else 0
+            step['percentage'] = (step['duration_ms'] / total_duration * 100) if total_duration > 0 else 0
 
         return sorted_steps
 
