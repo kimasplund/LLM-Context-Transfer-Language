@@ -473,7 +473,7 @@ class TestReplayEngine:
         """Test replay engine creation."""
         engine = ReplayEngine(sample_chain)
         assert engine.chain == sample_chain
-        assert engine._state_cache == {}
+        assert len(engine._state_cache) == 0
 
     def test_replay_to_specific_seq(self, replay_engine: ReplayEngine):
         """Test replaying to specific sequence number."""
@@ -508,11 +508,11 @@ class TestReplayEngine:
 
     def test_replay_uses_cache(self, replay_engine: ReplayEngine):
         """Test that replay engine caches intermediate states."""
-        replay_engine._state_cache[3] = State(
+        replay_engine._state_cache.put(3, State(
             facts={"CACHED": {"text": "cached", "confidence": 1.0}},
             metrics={"event_count": 3, "total_duration_ms": 0,
                      "total_tokens_in": 0, "total_tokens_out": 0, "error_count": 0}
-        )
+        ))
         state = replay_engine.replay_to(5)
 
         assert "CACHED" in state.facts

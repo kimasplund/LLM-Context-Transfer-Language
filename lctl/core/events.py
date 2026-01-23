@@ -3,13 +3,80 @@
 import bisect
 import copy
 import json
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypeVar
 
 import yaml
+
+T = TypeVar("T")
+
+
+class LRUCache:
+    """LRU cache with configurable max size.
+
+    Uses OrderedDict to maintain insertion order and efficiently
+    move accessed items to the end (most recently used position).
+    """
+
+    def __init__(self, max_size: int = 100):
+        """Initialize LRU cache.
+
+        Args:
+            max_size: Maximum number of items to store. When exceeded,
+                     the least recently used item is evicted.
+        """
+        if max_size < 1:
+            raise ValueError("max_size must be at least 1")
+        self.max_size = max_size
+        self._cache: OrderedDict[int, Any] = OrderedDict()
+
+    def get(self, key: int) -> Optional[Any]:
+        """Get item by key, moving it to most recently used position.
+
+        Args:
+            key: The cache key to look up.
+
+        Returns:
+            The cached value if found, None otherwise.
+        """
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def put(self, key: int, value: Any) -> None:
+        """Put item in cache, evicting oldest if at capacity.
+
+        Args:
+            key: The cache key.
+            value: The value to cache.
+        """
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        else:
+            if len(self._cache) >= self.max_size:
+                self._cache.popitem(last=False)  # Remove oldest (first) item
+        self._cache[key] = value
+
+    def clear(self) -> None:
+        """Clear all cached items."""
+        self._cache.clear()
+
+    def __len__(self) -> int:
+        """Return number of items in cache."""
+        return len(self._cache)
+
+    def __contains__(self, key: int) -> bool:
+        """Check if key is in cache (does not affect LRU order)."""
+        return key in self._cache
+
+    def keys(self) -> List[int]:
+        """Return list of keys in LRU order (oldest first)."""
+        return list(self._cache.keys())
 
 
 class EventType(str, Enum):
@@ -249,9 +316,16 @@ class State:
 class ReplayEngine:
     """Engine for replaying events and time-travel debugging."""
 
-    def __init__(self, chain: Chain):
+    def __init__(self, chain: Chain, cache_size: int = 100):
+        """Initialize replay engine.
+
+        Args:
+            chain: The chain of events to replay.
+            cache_size: Maximum number of states to cache. Defaults to 100.
+                       Uses LRU eviction when capacity is reached.
+        """
         self.chain = chain
-        self._state_cache: Dict[int, State] = {}
+        self._state_cache: LRUCache = LRUCache(max_size=cache_size)
 
     def replay_to(self, target_seq: int) -> State:
         """Replay events up to target_seq and return state."""
@@ -265,16 +339,21 @@ class ReplayEngine:
 
         # Start from cached state or fresh
         if nearest_cached > 0:
-            cached_state = self._state_cache[nearest_cached]
-            # Use deep copies for nested structures (facts contains dicts, errors is list of dicts)
-            state = State(
-                facts=copy.deepcopy(cached_state.facts),
-                metrics=cached_state.metrics.copy(),  # Simple dict, shallow OK
-                errors=copy.deepcopy(cached_state.errors),  # List of dicts
-                current_agent=cached_state.current_agent,
-                current_step=cached_state.current_step
-            )
-            start_seq = nearest_cached + 1
+            cached_state = self._state_cache.get(nearest_cached)
+            if cached_state is not None:
+                # Use deep copies for nested structures (facts contains dicts, errors is list of dicts)
+                state = State(
+                    facts=copy.deepcopy(cached_state.facts),
+                    metrics=cached_state.metrics.copy(),  # Simple dict, shallow OK
+                    errors=copy.deepcopy(cached_state.errors),  # List of dicts
+                    current_agent=cached_state.current_agent,
+                    current_step=cached_state.current_step
+                )
+                start_seq = nearest_cached + 1
+            else:
+                # Cache miss (shouldn't happen if keys() is consistent, but be safe)
+                state = State()
+                start_seq = 1
         else:
             state = State()
             start_seq = 1
@@ -299,12 +378,9 @@ class ReplayEngine:
 
             state.apply_event(event)
 
-        # Cache the result
-        # We cache the state object directly. Future replay_to calls will perform a shallow copy.
-        # Since State.apply_event uses Copy-on-Write for mutable internals (facts),
-        # this is safe provided the user treats the returned State as immutable or
-        # understands that deep modifications could affect the cache (though CoW mitigates this).
-        self._state_cache[target_seq] = state
+        # Cache the result using LRU cache's put method
+        # This will evict the oldest entry if cache is at capacity
+        self._state_cache.put(target_seq, state)
 
         return state
 
@@ -337,11 +413,11 @@ class ReplayEngine:
             e1 = self.chain.events[i] if i < len(self.chain.events) else None
             e2 = other.chain.events[i] if i < len(other.chain.events) else None
 
-            if e1 is None:
+            if e1 is None and e2 is not None:
                 diffs.append({"seq": i + 1, "type": "missing_in_first", "event": e2.to_dict()})
-            elif e2 is None:
+            elif e2 is None and e1 is not None:
                 diffs.append({"seq": i + 1, "type": "missing_in_second", "event": e1.to_dict()})
-            elif e1.to_dict() != e2.to_dict():
+            elif e1 is not None and e2 is not None and e1.to_dict() != e2.to_dict():
                 diffs.append({
                     "seq": e1.seq,
                     "type": "diverged",
