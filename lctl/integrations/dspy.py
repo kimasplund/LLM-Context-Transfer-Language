@@ -186,6 +186,30 @@ class LCTLDSPyCallback:
         """Access the underlying LCTL chain."""
         return self.session.chain
 
+    def cleanup_stale_entries(self, max_age_seconds: float = 3600.0) -> int:
+        """Remove module entries older than max_age_seconds.
+
+        This method cleans up orphaned module entries that may have been left
+        behind due to errors or incomplete callback sequences. Useful for
+        preventing memory leaks in long-running applications.
+
+        Args:
+            max_age_seconds: Maximum age in seconds before a module entry is
+                considered stale. Defaults to 3600.0 (1 hour).
+
+        Returns:
+            Number of entries removed.
+        """
+        now = time.time()
+        with self._lock:
+            stale_ids = [
+                module_id for module_id, info in self._active_modules.items()
+                if now - info.get("start_time", now) > max_age_seconds
+            ]
+            for module_id in stale_ids:
+                self._active_modules.pop(module_id, None)
+            return len(stale_ids)
+
     @property
     def _module_stack(self) -> List[Dict[str, Any]]:
         """Backwards compatibility: return active modules as a list."""

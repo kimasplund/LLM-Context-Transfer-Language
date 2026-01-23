@@ -7,7 +7,7 @@ import os
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Callable, Dict, Optional
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -23,6 +23,11 @@ from .. import __version__
 from ..core.events import Chain, ReplayEngine
 from ..evaluation.metrics import ChainMetrics
 from ..streaming.emitter import EventEmitter, StreamingEvent, StreamingEventType
+
+
+# =============================================================================
+# Request/Response Models
+# =============================================================================
 
 
 class ReplayRequest(BaseModel):
@@ -66,123 +71,86 @@ class RpaEventSubmission(BaseModel):
     data: dict | None = None
 
 
-def create_app(working_dir: Optional[Path] = None) -> FastAPI:
-    """Create and configure the FastAPI application.
+# =============================================================================
+# Module-level Helper Functions
+# =============================================================================
 
-    Args:
-        working_dir: Directory to search for .lctl.json files. Defaults to cwd.
 
-    Returns:
-        Configured FastAPI application.
-    """
-    app = FastAPI(
-        title="LCTL Dashboard",
-        description="Web-based visualization for multi-agent LLM workflows",
-        version=__version__
-    )
+def _should_send_to_client(event: StreamingEvent, filters: Dict[str, Any]) -> bool:
+    """Check if an event should be sent to a client based on filters."""
+    if not filters:
+        return True
 
-    # Add CORS middleware for local development
-    # Only allow localhost origins for security
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://localhost:5173",
-            "http://localhost:8080",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:8080",
-            "http://localhost:5000",
-            "http://127.0.0.1:5000",
-        ],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if "chain_id" in filters and event.chain_id != filters["chain_id"]:
+        return False
 
-    # Set up rate limiting
-    limiter = Limiter(key_func=get_remote_address)
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    if "event_types" in filters:
+        event_type = event.type.value
+        if event.type == StreamingEventType.EVENT and event.payload.get("type"):
+            event_type = event.payload["type"]
+        if event_type not in filters["event_types"]:
+            return False
 
-    # Store working directory in app state
-    app.state.working_dir = working_dir or Path.cwd()
-    app.state.engine_cache = {}  # Cache for ReplayEngine instances: (abs_path, mtime) -> engine
-    app.state.emitter = EventEmitter(max_history=500)  # Global event emitter for streaming
-    app.state.webhooks: dict[str, WebhookRegistration] = {}  # Registered webhooks by ID
+    return True
 
-    # API Key Security Configuration
-    # Load API keys from environment variable (comma-separated) or generate one
-    env_keys = os.environ.get("LCTL_API_KEYS", "")
-    if env_keys:
-        app.state.api_keys = set(k.strip() for k in env_keys.split(",") if k.strip())
-    else:
-        app.state.api_keys = set()
 
-    # Security settings
-    app.state.require_api_key = os.environ.get("LCTL_REQUIRE_API_KEY", "false").lower() == "true"
-    app.state.localhost_bypass = os.environ.get("LCTL_LOCALHOST_BYPASS", "true").lower() == "true"
+def _get_secure_path(app: FastAPI, filename: str) -> Path:
+    """Resolve path and ensure it's within working directory."""
+    working_dir = app.state.working_dir.resolve()
+    try:
+        file_path = (working_dir / filename).resolve()
 
-    # Get paths to static files and templates
-    dashboard_dir = Path(__file__).parent
-    static_dir = dashboard_dir / "static"
-    templates_dir = dashboard_dir / "templates"
+        # Security: Check for symlinks pointing outside working dir
+        if file_path.is_symlink():
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Symbolic links not allowed"
+            )
 
-    # Mount static files
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        if not file_path.is_relative_to(working_dir):
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: Path outside working directory"
+            )
+        return file_path
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: Invalid path")
 
-    def get_secure_path(filename: str) -> Path:
-        """Resolve path and ensure it's within working directory."""
-        working_dir = app.state.working_dir.resolve()
-        try:
-            file_path = (working_dir / filename).resolve()
 
-            # Security: Check for symlinks pointing outside working dir
-            if file_path.is_symlink():
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access denied: Symbolic links not allowed"
-                )
+def _get_cached_engine(app: FastAPI, file_path: Path) -> ReplayEngine:
+    """Get ReplayEngine from cache or load it."""
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Chain file not found: {file_path.name}")
 
-            if not file_path.is_relative_to(working_dir):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Access denied: Path outside working directory"
-                )
-            return file_path
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied: Invalid path")
+    stat = file_path.stat()
+    cache_key = (str(file_path), stat.st_mtime)
 
-    def get_cached_engine(file_path: Path) -> ReplayEngine:
-        """Get ReplayEngine from cache or load it."""
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"Chain file not found: {file_path.name}")
+    if cache_key in app.state.engine_cache:
+        return app.state.engine_cache[cache_key]
 
-        stat = file_path.stat()
-        cache_key = (str(file_path), stat.st_mtime)
+    # Prune cache if too big (simple strategy)
+    if len(app.state.engine_cache) > 50:
+        app.state.engine_cache.clear()
 
-        if cache_key in app.state.engine_cache:
-            return app.state.engine_cache[cache_key]
+    try:
+        chain = Chain.load(file_path)
+        engine = ReplayEngine(chain)
+        app.state.engine_cache[cache_key] = engine
+        return engine
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid chain file: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading chain: {e}")
 
-        # Prune cache if too big (simple strategy)
-        if len(app.state.engine_cache) > 50:
-            app.state.engine_cache.clear()
 
-        try:
-            chain = Chain.load(file_path)
-            engine = ReplayEngine(chain)
-            app.state.engine_cache[cache_key] = engine
-            return engine
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid chain file: {e}")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error loading chain: {e}")
+def _is_localhost(request: Request) -> bool:
+    """Check if request is from localhost."""
+    client_host = request.client.host if request.client else ""
+    return client_host in ("127.0.0.1", "localhost", "::1")
 
-    def is_localhost(request: Request) -> bool:
-        """Check if request is from localhost."""
-        client_host = request.client.host if request.client else ""
-        return client_host in ("127.0.0.1", "localhost", "::1")
 
+def _create_verify_api_key(app: FastAPI) -> Callable:
+    """Create an API key verification dependency for the given app."""
     async def verify_api_key(
         request: Request,
         x_api_key: Optional[str] = Header(None, alias="X-API-Key")
@@ -195,7 +163,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         - Otherwise: Require API key for non-localhost requests
         """
         # Check if we should bypass for localhost
-        if app.state.localhost_bypass and is_localhost(request):
+        if app.state.localhost_bypass and _is_localhost(request):
             return True
 
         # If API key enforcement is disabled and no keys configured, allow
@@ -225,6 +193,80 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         return True
 
+    return verify_api_key
+
+
+# =============================================================================
+# Setup Functions
+# =============================================================================
+
+
+def _setup_middleware(app: FastAPI) -> None:
+    """Configure CORS and other middleware."""
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:8080",
+            "http://localhost:5000",
+            "http://127.0.0.1:5000",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _setup_rate_limiter(app: FastAPI) -> Limiter:
+    """Setup rate limiting."""
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    return limiter
+
+
+def _setup_app_state(app: FastAPI, working_dir: Optional[Path]) -> None:
+    """Initialize application state."""
+    # Store working directory in app state
+    app.state.working_dir = working_dir or Path.cwd()
+    app.state.engine_cache = {}  # Cache for ReplayEngine instances: (abs_path, mtime) -> engine
+    app.state.emitter = EventEmitter(max_history=500)  # Global event emitter for streaming
+    app.state.webhooks: dict[str, WebhookRegistration] = {}  # Registered webhooks by ID
+
+    # API Key Security Configuration
+    # Load API keys from environment variable (comma-separated) or generate one
+    env_keys = os.environ.get("LCTL_API_KEYS", "")
+    if env_keys:
+        app.state.api_keys = set(k.strip() for k in env_keys.split(",") if k.strip())
+    else:
+        app.state.api_keys = set()
+
+    # Security settings
+    app.state.require_api_key = os.environ.get("LCTL_REQUIRE_API_KEY", "false").lower() == "true"
+    app.state.localhost_bypass = os.environ.get("LCTL_LOCALHOST_BYPASS", "true").lower() == "true"
+
+
+def _setup_static_files(app: FastAPI) -> None:
+    """Mount static files."""
+    dashboard_dir = Path(__file__).parent
+    static_dir = dashboard_dir / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+# =============================================================================
+# Endpoint Registration Functions
+# =============================================================================
+
+
+def _register_health_endpoints(app: FastAPI) -> None:
+    """Register health check and index endpoints."""
+    dashboard_dir = Path(__file__).parent
+    templates_dir = dashboard_dir / "templates"
+
     @app.get("/", response_class=HTMLResponse)
     async def index():
         """Serve the main dashboard HTML."""
@@ -232,6 +274,15 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         if not index_path.exists():
             raise HTTPException(status_code=500, detail="Dashboard template not found")
         return index_path.read_text()
+
+    @app.get("/api/health", response_class=JSONResponse)
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "ok", "version": __version__, "streaming": True}
+
+
+def _register_core_endpoints(app: FastAPI, limiter: Limiter) -> None:
+    """Register core chain/replay endpoints."""
 
     @app.get("/api/chains", response_class=JSONResponse)
     async def list_chains():
@@ -267,8 +318,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     @app.get("/api/chain/{filename}", response_class=JSONResponse)
     async def get_chain(filename: str):
         """Load and return chain data with analysis."""
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         # Get full state
@@ -316,8 +367,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
     @app.post("/api/replay", response_class=JSONResponse)
     async def replay_chain(request: ReplayRequest):
         """Replay chain to a specific sequence number."""
-        file_path = get_secure_path(request.filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, request.filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         if request.target_seq < 1:
@@ -346,67 +397,15 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             }
         }
 
-    @app.get("/api/metrics/{filename}", response_class=JSONResponse)
-    async def get_metrics(filename: str):
-        """Get detailed metrics for a chain including per-agent breakdown."""
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
-        chain = engine.chain
-
-        state = engine.replay_all()
-        bottlenecks = engine.find_bottlenecks()
-
-        # use shared ChainMetrics to calculate stats efficiently
-        metrics = ChainMetrics.from_chain(chain, state)
-        agent_metrics = metrics.agent_stats
-
-        error_timeline = []
-        for event in chain.events:
-            event_type = event.type.value if hasattr(event.type, 'value') else event.type
-            if event_type == "error":
-                error_timeline.append({
-                    "seq": event.seq,
-                    "timestamp": event.timestamp.isoformat(),
-                    "agent": event.agent,
-                    "category": event.data.get("category", "unknown"),
-                    "type": event.data.get("type", "unknown"),
-                    "message": event.data.get("message", ""),
-                    "recoverable": event.data.get("recoverable", False)
-                })
-
-        token_distribution = {
-            "input": state.metrics.get("total_tokens_in", 0),
-            "output": state.metrics.get("total_tokens_out", 0)
-        }
-
-        return {
-            "chain": {
-                "id": chain.id,
-                "filename": filename
-            },
-            "summary": {
-                "total_events": metrics.total_events,
-                "total_agents": metrics.agent_count,
-                "total_duration_ms": metrics.total_duration_ms,
-                "total_tokens": metrics.total_tokens,
-                "total_errors": metrics.error_count,
-                "total_facts": metrics.fact_count
-            },
-            "agent_metrics": agent_metrics,
-            "token_distribution": token_distribution,
-            "error_timeline": error_timeline,
-            "bottlenecks": bottlenecks[:10]
-        }
-
     @app.post("/api/compare", response_class=JSONResponse)
     @limiter.limit("10/minute")
     async def compare_chains(request: Request, compare_req: CompareRequest):  # noqa: ARG001
         """Compare two chains and return differences."""
-        path1 = get_secure_path(compare_req.filename1)
-        path2 = get_secure_path(compare_req.filename2)
+        path1 = _get_secure_path(app, compare_req.filename1)
+        path2 = _get_secure_path(app, compare_req.filename2)
 
-        engine1 = get_cached_engine(path1)
-        engine2 = get_cached_engine(path2)
+        engine1 = _get_cached_engine(app, path1)
+        engine2 = _get_cached_engine(app, path2)
         chain1 = engine1.chain
         chain2 = engine2.chain
 
@@ -464,11 +463,67 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             "divergence_point": diffs[0]["seq"] if diffs else None
         }
 
+
+def _register_analysis_endpoints(app: FastAPI) -> None:
+    """Register analysis endpoints (stats, bottlenecks, confidence)."""
+
+    @app.get("/api/metrics/{filename}", response_class=JSONResponse)
+    async def get_metrics(filename: str):
+        """Get detailed metrics for a chain including per-agent breakdown."""
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
+        chain = engine.chain
+
+        state = engine.replay_all()
+        bottlenecks = engine.find_bottlenecks()
+
+        # use shared ChainMetrics to calculate stats efficiently
+        metrics = ChainMetrics.from_chain(chain, state)
+        agent_metrics = metrics.agent_stats
+
+        error_timeline = []
+        for event in chain.events:
+            event_type = event.type.value if hasattr(event.type, 'value') else event.type
+            if event_type == "error":
+                error_timeline.append({
+                    "seq": event.seq,
+                    "timestamp": event.timestamp.isoformat(),
+                    "agent": event.agent,
+                    "category": event.data.get("category", "unknown"),
+                    "type": event.data.get("type", "unknown"),
+                    "message": event.data.get("message", ""),
+                    "recoverable": event.data.get("recoverable", False)
+                })
+
+        token_distribution = {
+            "input": state.metrics.get("total_tokens_in", 0),
+            "output": state.metrics.get("total_tokens_out", 0)
+        }
+
+        return {
+            "chain": {
+                "id": chain.id,
+                "filename": filename
+            },
+            "summary": {
+                "total_events": metrics.total_events,
+                "total_agents": metrics.agent_count,
+                "total_duration_ms": metrics.total_duration_ms,
+                "total_tokens": metrics.total_tokens,
+                "total_errors": metrics.error_count,
+                "total_facts": metrics.fact_count
+            },
+            "agent_metrics": agent_metrics,
+            "token_distribution": token_distribution,
+            "error_timeline": error_timeline,
+            "bottlenecks": bottlenecks[:10]
+        }
+
     @app.get("/api/evaluation/{filename}", response_class=JSONResponse)
     async def get_evaluation(filename: str):
         """Get comprehensive evaluation report for a chain."""
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
         state = engine.replay_all()
         bottlenecks = engine.find_bottlenecks()
@@ -584,10 +639,9 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             "confidence_timeline": confidence_timeline
         }
 
-    @app.get("/api/health", response_class=JSONResponse)
-    async def health_check():
-        """Health check endpoint."""
-        return {"status": "ok", "version": __version__, "streaming": True}
+
+def _register_streaming_endpoints(app: FastAPI) -> None:
+    """Register WebSocket and SSE streaming endpoints."""
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
@@ -733,6 +787,22 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             }
         )
 
+    @app.get("/api/streaming/status", response_class=JSONResponse)
+    async def streaming_status():
+        """Get streaming status including connected clients and event count."""
+        emitter = app.state.emitter
+        return {
+            "enabled": True,
+            "chain_id": emitter.chain_id,
+            "event_count": emitter.event_count,
+            "handler_count": emitter.handler_count(),
+            "history_size": len(emitter.history)
+        }
+
+
+def _register_event_endpoints(app: FastAPI) -> None:
+    """Register event emission endpoints."""
+
     @app.post("/api/events/emit", response_class=JSONResponse)
     async def emit_event(request: Request):
         """Emit a custom event to all connected clients.
@@ -760,21 +830,10 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         return {"status": "emitted", "event_id": streaming_event.id}
 
-    @app.get("/api/streaming/status", response_class=JSONResponse)
-    async def streaming_status():
-        """Get streaming status including connected clients and event count."""
-        emitter = app.state.emitter
-        return {
-            "enabled": True,
-            "chain_id": emitter.chain_id,
-            "event_count": emitter.event_count,
-            "handler_count": emitter.handler_count(),
-            "history_size": len(emitter.history)
-        }
 
-    # =========================================================================
-    # RPA / UiPath Integration Endpoints (Protected by API Key)
-    # =========================================================================
+def _register_rpa_endpoints(app: FastAPI, limiter: Limiter) -> None:
+    """Register RPA/UiPath integration endpoints."""
+    verify_api_key = _create_verify_api_key(app)
 
     @app.get("/api/rpa/auth/status", response_class=JSONResponse)
     async def rpa_auth_status(request: Request):
@@ -785,11 +844,11 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         return {
             "require_api_key": app.state.require_api_key,
             "localhost_bypass": app.state.localhost_bypass,
-            "is_localhost": is_localhost(request),
+            "is_localhost": _is_localhost(request),
             "api_keys_configured": len(app.state.api_keys) > 0,
             "auth_required": (
                 app.state.require_api_key or
-                (app.state.api_keys and not (app.state.localhost_bypass and is_localhost(request)))
+                (app.state.api_keys and not (app.state.localhost_bypass and _is_localhost(request)))
             )
         }
 
@@ -804,7 +863,7 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
         For initial setup on localhost, this can be called without auth.
         """
         # Only allow from localhost if no keys exist yet
-        if not app.state.api_keys and not is_localhost(request):
+        if not app.state.api_keys and not _is_localhost(request):
             raise HTTPException(
                 status_code=403,
                 detail="Initial key generation only allowed from localhost"
@@ -828,8 +887,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         Returns flat structure optimized for UiPath DataTable mapping.
         """
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
         state = engine.replay_all()
 
@@ -863,8 +922,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         Each event is a flat dictionary with no nested objects.
         """
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         events = []
@@ -925,8 +984,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         CSV format is ideal for Excel/DataTable processing in UiPath.
         """
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         events = []
@@ -983,8 +1042,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         for filename in batch_req.filenames:
             try:
-                file_path = get_secure_path(filename)
-                engine = get_cached_engine(file_path)
+                file_path = _get_secure_path(app, filename)
+                engine = _get_cached_engine(app, file_path)
                 chain = engine.chain
                 state = engine.replay_all()
 
@@ -1161,8 +1220,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         Supports long-polling with timeout for efficient polling.
         """
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         new_events = [
@@ -1188,8 +1247,8 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
 
         Quick endpoint to check if a workflow had any issues.
         """
-        file_path = get_secure_path(filename)
-        engine = get_cached_engine(file_path)
+        file_path = _get_secure_path(app, filename)
+        engine = _get_cached_engine(app, file_path)
         chain = engine.chain
 
         errors = []
@@ -1213,25 +1272,53 @@ def create_app(working_dir: Optional[Path] = None) -> FastAPI:
             "chain_id": chain.id
         }
 
+
+# =============================================================================
+# Application Factory
+# =============================================================================
+
+
+def create_app(working_dir: Optional[Path] = None) -> FastAPI:
+    """Create and configure the FastAPI application.
+
+    Args:
+        working_dir: Directory to search for .lctl.json files. Defaults to cwd.
+
+    Returns:
+        Configured FastAPI application.
+    """
+    app = FastAPI(
+        title="LCTL Dashboard",
+        description="Web-based visualization for multi-agent LLM workflows",
+        version=__version__
+    )
+
+    # Setup middleware
+    _setup_middleware(app)
+
+    # Setup rate limiter
+    limiter = _setup_rate_limiter(app)
+
+    # Initialize app state
+    _setup_app_state(app, working_dir)
+
+    # Register endpoint groups
+    _register_health_endpoints(app)
+    _register_core_endpoints(app, limiter)
+    _register_analysis_endpoints(app)
+    _register_streaming_endpoints(app)
+    _register_rpa_endpoints(app, limiter)
+    _register_event_endpoints(app)
+
+    # Mount static files
+    _setup_static_files(app)
+
     return app
 
 
-def _should_send_to_client(event: StreamingEvent, filters: Dict[str, Any]) -> bool:
-    """Check if an event should be sent to a client based on filters."""
-    if not filters:
-        return True
-
-    if "chain_id" in filters and event.chain_id != filters["chain_id"]:
-        return False
-
-    if "event_types" in filters:
-        event_type = event.type.value
-        if event.type == StreamingEventType.EVENT and event.payload.get("type"):
-            event_type = event.payload["type"]
-        if event_type not in filters["event_types"]:
-            return False
-
-    return True
+# =============================================================================
+# Server Runner
+# =============================================================================
 
 
 def run_dashboard(

@@ -1,5 +1,12 @@
 """LCTL Integrations - Framework integrations for automatic tracing."""
 
+from .base import (
+    truncate,
+    check_availability,
+    IntegrationNotAvailableError,
+    BaseTracer,
+    TracerMixin,
+)
 from .claude_code import (
     LCTLClaudeCodeTracer,
     generate_hooks as generate_claude_code_hooks,
@@ -82,6 +89,12 @@ from .pydantic_ai import (
 )
 
 __all__ = [
+    # Base classes and utilities
+    "truncate",
+    "check_availability",
+    "IntegrationNotAvailableError",
+    "BaseTracer",
+    "TracerMixin",
     # Claude Code integration
     "LCTLClaudeCodeTracer",
     "generate_claude_code_hooks",
