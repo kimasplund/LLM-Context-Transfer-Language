@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     import dspy
@@ -43,13 +44,6 @@ except ImportError:
     Predict = None
     Signature = None
     dspy = None
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries."""
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 3] + "..."
 
 
 def _extract_signature_info(signature: Any) -> Dict[str, Any]:
@@ -120,7 +114,7 @@ def _get_module_name(module: Any) -> str:
             if hasattr(sig, "__name__"):
                 return f"{class_name}[{sig.__name__}]"
             elif isinstance(sig, str):
-                return f"{class_name}[{_truncate(sig, 30)}]"
+                return f"{class_name}[{truncate(sig, 30)}]"
 
         return class_name
 
@@ -253,7 +247,7 @@ class LCTLDSPyCallback:
             self.session.step_start(
                 agent=module_name,
                 intent="module_forward",
-                input_summary=_truncate(input_summary, 200),
+                input_summary=truncate(input_summary, 200),
             )
         except Exception:
             pass
@@ -322,7 +316,7 @@ class LCTLDSPyCallback:
                 self.session.step_end(
                     agent=module_name,
                     outcome="success",
-                    output_summary=_truncate(prediction_text, 200),
+                    output_summary=truncate(prediction_text, 200),
                     duration_ms=duration_ms,
                 )
             except Exception:
@@ -332,7 +326,7 @@ class LCTLDSPyCallback:
             try:
                 self.session.add_fact(
                     fact_id=fact_id,
-                    text=f"Prediction: {_truncate(prediction_text, 300)}",
+                    text=f"Prediction: {truncate(prediction_text, 300)}",
                     confidence=1.0,
                     source=module_name,
                 )
@@ -372,8 +366,8 @@ class LCTLDSPyCallback:
 
         try:
             self.session.llm_trace(
-                messages=[{"role": "user", "content": _truncate(prompt, 300)}],
-                response=_truncate(response, 300),
+                messages=[{"role": "user", "content": truncate(prompt, 300)}],
+                response=truncate(response, 300),
                 model=model,
                 usage={"input": tokens_in, "output": tokens_out},
                 duration_ms=duration_ms,
@@ -445,7 +439,7 @@ class LCTLDSPyCallback:
             self.session.step_start(
                 agent=teleprompter_name,
                 intent="optimization",
-                input_summary=_truncate(config_summary, 200),
+                input_summary=truncate(config_summary, 200),
             )
         except Exception:
             pass

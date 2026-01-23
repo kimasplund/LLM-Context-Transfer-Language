@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 # Metadata for availability
 AUTOGEN_MODE = "none"  # none, legacy, modern
@@ -76,19 +77,6 @@ def _check_autogen_available() -> None:
     """Check if AutoGen is available, raise error if not."""
     if not AUTOGEN_AVAILABLE:
         raise AutogenNotAvailableError()
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries.
-
-    Handles edge case where max_length < 4 by returning truncated text
-    without ellipsis suffix.
-    """
-    if max_length < 4:
-        return text[:max_length] if len(text) > max_length else text
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 3] + "..."
 
 
 def _extract_message_content(message: Union[str, Dict[str, Any], None]) -> str:
@@ -174,7 +162,7 @@ class LCTLAutogenHandler(logging.Handler):
         completion_tokens = self._get_event_field(event, "completion_tokens", 0)
 
         input_summary = f"{len(messages)} messages" if messages else "LLM Call"
-        output_summary = _truncate(str(response)) if response else ""
+        output_summary = truncate(str(response)) if response else ""
 
         with self._lock:
             try:
@@ -199,8 +187,8 @@ class LCTLAutogenHandler(logging.Handler):
             try:
                 self.session.tool_call(
                     tool=tool_name,
-                    input_data=_truncate(args, 200),
-                    output_data=_truncate(result, 200),
+                    input_data=truncate(args, 200),
+                    output_data=truncate(result, 200),
                     duration_ms=0
                 )
             except Exception:
@@ -214,7 +202,7 @@ class LCTLAutogenHandler(logging.Handler):
 
         with self._lock:
             try:
-                self.session.step_start(agent=sender, intent="send_message", input_summary=_truncate(payload, 50))
+                self.session.step_start(agent=sender, intent="send_message", input_summary=truncate(payload, 50))
                 self.session.step_end(agent=sender, outcome="success", output_summary="Message processed")
             except Exception:
                 pass  # Graceful degradation
@@ -373,7 +361,7 @@ class LCTLAutogenCallback:
                     self.session.step_start(
                         agent=sender_name,
                         intent="send_message",
-                        input_summary=f"To {recipient_name}: {_truncate(content, 100)}",
+                        input_summary=f"To {recipient_name}: {truncate(content, 100)}",
                     )
 
                     if isinstance(message, dict):
@@ -389,7 +377,7 @@ class LCTLAutogenCallback:
 
                                 self.session.tool_call(
                                     tool=tool_name,
-                                    input_data=_truncate(str(tool_args), 200),
+                                    input_data=truncate(str(tool_args), 200),
                                     output_data="(pending)",
                                     duration_ms=0,
                                 )
@@ -445,7 +433,7 @@ class LCTLAutogenCallback:
                         self.session.step_end(
                             agent=agent_name,
                             outcome="success",
-                            output_summary=_truncate(content, 100),
+                            output_summary=truncate(content, 100),
                             duration_ms=duration_ms,
                         )
                     except Exception:
@@ -542,7 +530,7 @@ class LCTLAutogenCallback:
             duration_ms: How long the tool call took in milliseconds
             agent: Optional agent name that invoked the tool
         """
-        result_str = _truncate(str(result), 500) if result else "(no result)"
+        result_str = truncate(str(result), 500) if result else "(no result)"
 
         try:
             self.session.tool_call(

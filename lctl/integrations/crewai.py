@@ -30,13 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from ..core.session import LCTLSession
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text to a maximum length with ellipsis."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
+from .base import truncate
 
 # Try to import CrewAI - graceful degradation if not available
 try:
@@ -403,7 +397,7 @@ class LCTLCrew:
                 agent_name = self._get_agent_name(step_output.agent)
 
             if hasattr(step_output, "thought"):
-                thought = _truncate(str(step_output.thought), 500)
+                thought = truncate(str(step_output.thought), 500)
 
             if hasattr(step_output, "tool"):
                 tool_name = str(step_output.tool)
@@ -412,7 +406,7 @@ class LCTLCrew:
                 tool_input = step_output.tool_input
 
             if hasattr(step_output, "result"):
-                tool_output = _truncate(str(step_output.result), 500) if step_output.result else None
+                tool_output = truncate(str(step_output.result), 500) if step_output.result else None
 
             # Extract duration from step output if available
             duration_ms = 0
@@ -425,7 +419,7 @@ class LCTLCrew:
             self._session.step_start(
                 agent=agent_name,
                 intent="execute_step",
-                input_summary=_truncate(thought, 100) if thought else "Agent step"
+                input_summary=truncate(thought, 100) if thought else "Agent step"
             )
 
             # Record tool call if applicable
@@ -441,7 +435,7 @@ class LCTLCrew:
             self._session.step_end(
                 agent=agent_name,
                 outcome="success",
-                output_summary=_truncate(tool_output, 100) if tool_output else "Step completed",
+                output_summary=truncate(tool_output, 100) if tool_output else "Step completed",
                 duration_ms=duration_ms
             )
 
@@ -465,12 +459,12 @@ class LCTLCrew:
             task_output_text = ""
 
             if hasattr(task_output, "description"):
-                task_description = _truncate(str(task_output.description), 200)
+                task_description = truncate(str(task_output.description), 200)
 
             if hasattr(task_output, "raw"):
-                task_output_text = _truncate(str(task_output.raw), 500)
+                task_output_text = truncate(str(task_output.raw), 500)
             elif hasattr(task_output, "output"):
-                task_output_text = _truncate(str(task_output.output), 500)
+                task_output_text = truncate(str(task_output.output), 500)
 
             # Add fact about task completion
             fact_id = f"task-{len(self._session.chain.events)}"

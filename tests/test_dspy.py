@@ -818,18 +818,18 @@ class TestHelperFunctions:
 
     def test_truncate_short_text(self):
         """Test _truncate with short text."""
-        from lctl.integrations.dspy import _truncate
+        from lctl.integrations.base import truncate
 
         text = "Short text"
-        result = _truncate(text, max_length=200)
+        result = truncate(text, max_length=200)
         assert result == text
 
     def test_truncate_long_text(self):
         """Test _truncate with long text."""
-        from lctl.integrations.dspy import _truncate
+        from lctl.integrations.base import truncate
 
         text = "A" * 300
-        result = _truncate(text, max_length=100)
+        result = truncate(text, max_length=100)
         assert len(result) == 100
         assert result.endswith("...")
 

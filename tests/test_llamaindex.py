@@ -11,6 +11,7 @@ import pytest
 
 from lctl.core.events import Chain, Event, EventType, ReplayEngine
 from lctl.core.session import LCTLSession
+from lctl.integrations.base import truncate
 
 
 class MockCBEventType:
@@ -633,13 +634,13 @@ class TestHelperFunctions:
     def test_truncate_short_text(self):
         """Test truncate with short text."""
         text = "Short text"
-        result = llamaindex_module._truncate(text, max_length=200)
+        result = truncate(text, max_length=200)
         assert result == text
 
     def test_truncate_long_text(self):
         """Test truncate with long text."""
         text = "A" * 300
-        result = llamaindex_module._truncate(text, max_length=100)
+        result = truncate(text, max_length=100)
         assert len(result) == 100
         assert result.endswith("...")
 

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, Optional
 from unittest.mock import MagicMock
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     from pydantic_ai import Agent
@@ -34,21 +35,6 @@ except ImportError:
 if TYPE_CHECKING:
     from pydantic_ai import Agent
     from pydantic_ai.run import AgentRunResult
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries.
-
-    Args:
-        text: The text to truncate.
-        max_length: Maximum length before truncation.
-
-    Returns:
-        The original text if within limit, otherwise truncated with ellipsis.
-    """
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 3] + "..."
 
 
 class LCTLPydanticAITracer:
@@ -218,8 +204,8 @@ class TracedAgent:
 
             self.tracer.session.tool_call(
                 tool=name,
-                input_data=_truncate(str(input_data)),
-                output_data=_truncate(str(result), max_length=500),
+                input_data=truncate(str(input_data)),
+                output_data=truncate(str(result), max_length=500),
                 duration_ms=duration_ms,
             )
             return result
@@ -227,7 +213,7 @@ class TracedAgent:
             duration_ms = int((time.time() - start_time) * 1000)
             self.tracer.session.tool_call(
                 tool=name,
-                input_data=_truncate(str(input_data)),
+                input_data=truncate(str(input_data)),
                 output_data=f"Error: {str(e)}",
                 duration_ms=duration_ms,
             )
@@ -254,8 +240,8 @@ class TracedAgent:
 
             self.tracer.session.tool_call(
                 tool=name,
-                input_data=_truncate(str(input_data)),
-                output_data=_truncate(str(result), max_length=500),
+                input_data=truncate(str(input_data)),
+                output_data=truncate(str(result), max_length=500),
                 duration_ms=duration_ms,
             )
             return result
@@ -263,7 +249,7 @@ class TracedAgent:
             duration_ms = int((time.time() - start_time) * 1000)
             self.tracer.session.tool_call(
                 tool=name,
-                input_data=_truncate(str(input_data)),
+                input_data=truncate(str(input_data)),
                 output_data=f"Error: {str(e)}",
                 duration_ms=duration_ms,
             )
@@ -312,7 +298,7 @@ class TracedAgent:
         self.tracer.session.step_start(
             agent=agent_name,
             intent="run",
-            input_summary=_truncate(str(user_prompt)),
+            input_summary=truncate(str(user_prompt)),
         )
 
         try:
@@ -405,7 +391,7 @@ class TracedAgent:
         self.tracer.session.step_start(
             agent=agent_name,
             intent="run_stream",
-            input_summary=_truncate(str(user_prompt)),
+            input_summary=truncate(str(user_prompt)),
         )
 
         traced_result = None

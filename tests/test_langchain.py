@@ -11,9 +11,9 @@ from lctl.integrations.langchain import (
     LCTLChain,
     trace_chain,
     is_available,
-    _truncate,
     _extract_token_counts
 )
+from lctl.integrations.base import truncate
 
 # Mock classes for Type checking/Import
 class MockLLMResult:
@@ -57,10 +57,10 @@ def test_handler_init(mock_langchain_available):
     assert handler.session.chain.id == "my-chain"
     assert handler.chain.id == "my-chain"
 
-def test_truncate():
+def testtruncate():
     """Test string truncation helper."""
-    assert _truncate("hello", 10) == "hello"
-    assert _truncate("hello world", 5) == "he..."
+    assert truncate("hello", 10) == "hello"
+    assert truncate("hello world", 5) == "he..."
 
 def test_extract_token_counts():
     """Test token count extraction."""

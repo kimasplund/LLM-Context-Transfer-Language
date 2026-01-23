@@ -22,6 +22,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     from agents import (
@@ -50,13 +51,6 @@ except ImportError:
 
 # Default timeout for stale entry cleanup (1 hour)
 DEFAULT_STALE_TIMEOUT_SECONDS: float = 3600.0
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
 
 
 def _extract_usage(usage: Any) -> Dict[str, int]:
@@ -192,7 +186,7 @@ class LCTLRunHooks(RunHooks):
             input_summary = ""
             if hasattr(context, "input") and context.input:
                 input_text = str(context.input)
-                input_summary = _truncate(input_text)
+                input_summary = truncate(input_text)
 
             self._session.step_start(
                 agent=agent_name,
@@ -203,7 +197,7 @@ class LCTLRunHooks(RunHooks):
             if hasattr(agent, "instructions") and agent.instructions:
                 self._session.add_fact(
                     fact_id=f"agent_{agent_name}_instructions",
-                    text=f"Agent instructions: {_truncate(agent.instructions, 300)}",
+                    text=f"Agent instructions: {truncate(agent.instructions, 300)}",
                     confidence=1.0,
                     source=agent_name,
                 )
@@ -234,9 +228,9 @@ class LCTLRunHooks(RunHooks):
             output_summary = ""
             if output is not None:
                 if hasattr(output, "final_output"):
-                    output_summary = _truncate(str(output.final_output))
+                    output_summary = truncate(str(output.final_output))
                 else:
-                    output_summary = _truncate(str(output))
+                    output_summary = truncate(str(output))
 
             tokens = {"input": 0, "output": 0}
             if hasattr(output, "usage"):
@@ -317,8 +311,8 @@ class LCTLRunHooks(RunHooks):
             duration_ms = int((time.time() - start_time) * 1000)
             input_data = tool_info.get("input", "")
 
-            input_str = _truncate(str(input_data)) if input_data else ""
-            output_str = _truncate(str(output)) if output else ""
+            input_str = truncate(str(input_data)) if input_data else ""
+            output_str = truncate(str(output)) if output else ""
 
             self._session.tool_call(
                 tool=tool_name,
@@ -361,7 +355,7 @@ class LCTLRunHooks(RunHooks):
             duration_ms = int((time.time() - start_time) * 1000)
             input_data = tool_info.get("input", "")
 
-            input_str = _truncate(str(input_data)) if input_data else ""
+            input_str = truncate(str(input_data)) if input_data else ""
             error_output = f"ERROR: {type(error).__name__}: {str(error)[:100]}"
 
             self._session.tool_call(
@@ -487,7 +481,7 @@ class LCTLTracingProcessor(TracingProcessor):
 
             self._session.add_fact(
                 fact_id=f"trace_{int(time.time() * 1000)}",
-                text=f"Trace completed: {_truncate(str(trace_data), 500)}",
+                text=f"Trace completed: {truncate(str(trace_data), 500)}",
                 confidence=1.0,
                 source="tracing_processor",
             )
@@ -638,8 +632,8 @@ class LCTLOpenAIAgentTracer:
         """
         self._session.tool_call(
             tool=tool,
-            input_data=_truncate(str(input_data)),
-            output_data=_truncate(str(output_data)),
+            input_data=truncate(str(input_data)),
+            output_data=truncate(str(output_data)),
             duration_ms=duration_ms,
         )
 
@@ -797,7 +791,7 @@ class AgentRunContext:
         Args:
             output_summary: Summary of the output.
         """
-        self._output_summary = _truncate(output_summary)
+        self._output_summary = truncate(output_summary)
 
     def set_usage(self, tokens_in: int = 0, tokens_out: int = 0) -> None:
         """Set token usage for the run.
@@ -826,8 +820,8 @@ class AgentRunContext:
         """
         self._session.tool_call(
             tool=tool,
-            input_data=_truncate(str(input_data)),
-            output_data=_truncate(str(output_data)),
+            input_data=truncate(str(input_data)),
+            output_data=truncate(str(output_data)),
             duration_ms=duration_ms,
         )
 
@@ -906,7 +900,7 @@ class TracedAgent:
         if hasattr(agent, "instructions") and agent.instructions:
             self._tracer.session.add_fact(
                 fact_id=f"agent_{agent_name}_config",
-                text=f"Agent '{agent_name}' configured with instructions: {_truncate(agent.instructions, 300)}",
+                text=f"Agent '{agent_name}' configured with instructions: {truncate(agent.instructions, 300)}",
                 confidence=1.0,
                 source="setup",
             )

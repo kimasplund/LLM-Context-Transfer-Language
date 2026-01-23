@@ -685,42 +685,42 @@ class TestHelperFunctions:
 
     def test_truncate_short_text(self):
         """Test truncate with short text."""
-        from lctl.integrations.autogen import _truncate
+        from lctl.integrations.base import truncate
 
         text = "Short text"
-        result = _truncate(text, max_length=200)
+        result = truncate(text, max_length=200)
         assert result == text
 
     def test_truncate_long_text(self):
         """Test truncate with long text."""
-        from lctl.integrations.autogen import _truncate
+        from lctl.integrations.base import truncate
 
         text = "A" * 300
-        result = _truncate(text, max_length=100)
+        result = truncate(text, max_length=100)
         assert len(result) == 100
         assert result.endswith("...")
 
     def test_truncate_max_length_less_than_four(self):
         """Test truncate with max_length < 4 (edge case)."""
-        from lctl.integrations.autogen import _truncate
+        from lctl.integrations.base import truncate
 
         text = "Hello World"
-        result = _truncate(text, max_length=3)
+        result = truncate(text, max_length=3)
         assert result == "Hel"
         assert len(result) == 3
 
-        result2 = _truncate(text, max_length=1)
+        result2 = truncate(text, max_length=1)
         assert result2 == "H"
 
-        result3 = _truncate(text, max_length=0)
+        result3 = truncate(text, max_length=0)
         assert result3 == ""
 
     def test_truncate_short_text_with_small_max_length(self):
         """Test truncate with text shorter than max_length < 4."""
-        from lctl.integrations.autogen import _truncate
+        from lctl.integrations.base import truncate
 
         text = "Hi"
-        result = _truncate(text, max_length=3)
+        result = truncate(text, max_length=3)
         assert result == "Hi"
 
     def test_extract_message_content_string(self):

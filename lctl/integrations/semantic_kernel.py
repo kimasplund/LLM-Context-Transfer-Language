@@ -15,6 +15,7 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     # Check availability - import used for availability check
@@ -31,13 +32,6 @@ try:
     SK_AVAILABLE = True
 except ImportError:
     SK_AVAILABLE = False
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
 
 
 class SemanticKernelNotAvailableError(ImportError):
@@ -141,7 +135,7 @@ class LCTLSemanticKernelTracer:
         full_name = f"{plugin_name}.{function_name}"
 
         # Summarize inputs
-        input_summary = _truncate(str(context.arguments))
+        input_summary = truncate(str(context.arguments))
 
         try:
             self.session.step_start(
@@ -201,7 +195,7 @@ class LCTLSemanticKernelTracer:
                             self.session.step_end(
                                 agent=full_name,
                                 outcome="success",
-                                output_summary=_truncate(accumulated_content),
+                                output_summary=truncate(accumulated_content),
                                 duration_ms=duration_ms,
                                 tokens_in=tokens_in,
                                 tokens_out=tokens_out
@@ -238,7 +232,7 @@ class LCTLSemanticKernelTracer:
                                 self.session.step_end(
                                     agent=full_name,
                                     outcome="abandoned",
-                                    output_summary=_truncate(accumulated_content),
+                                    output_summary=truncate(accumulated_content),
                                     duration_ms=duration_ms,
                                     tokens_in=tokens_in,
                                     tokens_out=tokens_out
@@ -252,7 +246,7 @@ class LCTLSemanticKernelTracer:
 
             # Non-streaming handling
             duration_ms = int((time.time() - start_time) * 1000)
-            output_summary = _truncate(str(result)) if result else ""
+            output_summary = truncate(str(result)) if result else ""
 
             # Extract usage if available
             tokens_in = 0

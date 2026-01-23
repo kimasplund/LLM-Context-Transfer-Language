@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     from llama_index.core.callbacks import CallbackManager
@@ -57,16 +58,6 @@ def _check_llamaindex_available() -> None:
     """Check if LlamaIndex is available, raise error if not."""
     if not LLAMAINDEX_AVAILABLE:
         raise LlamaIndexNotAvailableError()
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries."""
-    if not text:
-        return ""
-    text = str(text)
-    if len(text) <= max_length:
-        return text
-    return text[: max_length - 3] + "..."
 
 
 def _extract_token_counts(payload: Dict[str, Any]) -> Dict[str, int]:
@@ -301,7 +292,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             self.session.step_end(
                 agent=agent_name,
                 outcome="error",
-                output_summary=_truncate(str(error)),
+                output_summary=truncate(str(error)),
                 duration_ms=duration_ms,
             )
             self.session.error(
@@ -346,13 +337,13 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             if isinstance(messages, list) and messages:
                 last_msg = messages[-1]
                 if hasattr(last_msg, "content"):
-                    input_summary = _truncate(str(last_msg.content))
+                    input_summary = truncate(str(last_msg.content))
                 elif isinstance(last_msg, dict):
-                    input_summary = _truncate(str(last_msg.get("content", "")))
+                    input_summary = truncate(str(last_msg.get("content", "")))
                 else:
-                    input_summary = _truncate(str(last_msg))
+                    input_summary = truncate(str(last_msg))
         elif prompt:
-            input_summary = _truncate(str(prompt))
+            input_summary = truncate(str(prompt))
 
         with self._lock:
             if event_id in self._event_stack:
@@ -394,7 +385,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_end",
             agent="llm",
             outcome="success",
-            output_summary=_truncate(response_text),
+            output_summary=truncate(response_text),
             duration_ms=duration_ms,
             tokens_in=tokens["input"],
             tokens_out=tokens["output"],
@@ -419,7 +410,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_start",
             agent="query_engine",
             intent="query",
-            input_summary=_truncate(query_str) if query_str else "Query execution",
+            input_summary=truncate(query_str) if query_str else "Query execution",
         )
 
     def _on_query_end(
@@ -443,7 +434,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_end",
             agent="query_engine",
             outcome="success",
-            output_summary=_truncate(response_text),
+            output_summary=truncate(response_text),
             duration_ms=duration_ms,
         )
 
@@ -465,7 +456,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_start",
             agent="retriever",
             intent="retrieve",
-            input_summary=_truncate(query_str) if query_str else "Retrieval",
+            input_summary=truncate(query_str) if query_str else "Retrieval",
         )
 
     def _on_retrieval_end(
@@ -486,7 +477,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
         self._safe_session_call(
             "tool_call",
             tool="retriever",
-            input_data=_truncate(query) if query else "retrieval query",
+            input_data=truncate(query) if query else "retrieval query",
             output_data=f"Retrieved {num_nodes} nodes",
             duration_ms=duration_ms,
         )
@@ -514,7 +505,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
                     self._safe_session_call(
                         "add_fact",
                         fact_id=f"retrieved-{event_id[:8]}-{i}",
-                        text=_truncate(node_text, 300),
+                        text=truncate(node_text, 300),
                         confidence=1.0,
                         source="retriever",
                     )
@@ -559,7 +550,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_start",
             agent="synthesizer",
             intent="synthesize",
-            input_summary=_truncate(query_str) if query_str else "Response synthesis",
+            input_summary=truncate(query_str) if query_str else "Response synthesis",
         )
 
     def _on_synthesize_end(
@@ -583,7 +574,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_end",
             agent="synthesizer",
             outcome="success",
-            output_summary=_truncate(response_text),
+            output_summary=truncate(response_text),
             duration_ms=duration_ms,
         )
 
@@ -597,7 +588,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_start",
             agent="templater",
             intent="template",
-            input_summary=_truncate(template) if template else "Template processing",
+            input_summary=truncate(template) if template else "Template processing",
         )
 
     def _on_templating_end(
@@ -656,7 +647,7 @@ class LCTLLlamaIndexCallback(BaseCallbackHandler):
             "step_start",
             agent="reranker",
             intent="rerank",
-            input_summary=_truncate(query_str) if query_str else "Reranking nodes",
+            input_summary=truncate(query_str) if query_str else "Reranking nodes",
         )
 
     def _on_reranking_end(

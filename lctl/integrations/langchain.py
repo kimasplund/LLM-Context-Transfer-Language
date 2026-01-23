@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import UUID
 
 from ..core.session import LCTLSession
+from .base import truncate
 
 try:
     from langchain_core.agents import AgentAction, AgentFinish
@@ -36,13 +37,6 @@ except ImportError:
     except ImportError:
         LANGCHAIN_AVAILABLE = False
         BaseCallbackHandler = object
-
-
-def _truncate(text: str, max_length: int = 200) -> str:
-    """Truncate text for summaries."""
-    if len(text) <= max_length:
-        return text
-    return text[:max_length - 3] + "..."
 
 
 def _extract_token_counts(response: Any) -> Dict[str, int]:
@@ -173,7 +167,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         agent_name = self._get_agent_name(serialized, "llm")
 
         prompts_list = list(prompts) if not isinstance(prompts, list) else prompts
-        prompt_summary = _truncate(prompts_list[0]) if prompts_list else ""
+        prompt_summary = truncate(prompts_list[0]) if prompts_list else ""
 
         with self._lock:
             self._run_stack[run_id] = {
@@ -221,7 +215,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
             self.session.step_end(
                 agent=agent_name,
                 outcome="success",
-                output_summary=_truncate(output_text),
+                output_summary=truncate(output_text),
                 duration_ms=duration_ms,
                 tokens_in=tokens["input"],
                 tokens_out=tokens["output"],
@@ -279,13 +273,13 @@ class LCTLCallbackHandler(BaseCallbackHandler):
             if hasattr(last_msg, "content"):
                 content = last_msg.content
                 if isinstance(content, str):
-                    message_summary = _truncate(content)
+                    message_summary = truncate(content)
                 elif isinstance(content, list) and content:
                     first_part = content[0]
                     if isinstance(first_part, dict) and "text" in first_part:
-                        message_summary = _truncate(first_part["text"])
+                        message_summary = truncate(first_part["text"])
                     elif isinstance(first_part, str):
-                        message_summary = _truncate(first_part)
+                        message_summary = truncate(first_part)
 
         with self._lock:
             self._run_stack[run_id] = {
@@ -327,7 +321,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
                 keys = list(inputs.keys())[:3]
                 input_summary = f"keys: {keys}"
             else:
-                input_summary = _truncate(str(inputs))
+                input_summary = truncate(str(inputs))
 
         with self._lock:
             self._run_stack[run_id] = {
@@ -368,7 +362,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
                 keys = list(outputs.keys())[:3]
                 output_summary = f"keys: {keys}"
             else:
-                output_summary = _truncate(str(outputs))
+                output_summary = truncate(str(outputs))
 
         try:
             self.session.step_end(
@@ -459,8 +453,8 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         try:
             self.session.tool_call(
                 tool=tool_name,
-                input_data=_truncate(input_data),
-                output_data=_truncate(output) if isinstance(output, str) else _truncate(str(output)),
+                input_data=truncate(input_data),
+                output_data=truncate(output) if isinstance(output, str) else truncate(str(output)),
                 duration_ms=duration_ms,
             )
         except Exception:
@@ -485,7 +479,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         try:
             self.session.tool_call(
                 tool=tool_name,
-                input_data=_truncate(input_data),
+                input_data=truncate(input_data),
                 output_data=f"ERROR: {type(error).__name__}: {error}",
                 duration_ms=duration_ms,
             )
@@ -510,7 +504,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         try:
             self.session.add_fact(
                 fact_id=f"action_{run_id.hex[:8]}",
-                text=f"Agent action: {action.tool} with input: {_truncate(str(action.tool_input))}",
+                text=f"Agent action: {action.tool} with input: {truncate(str(action.tool_input))}",
                 confidence=1.0,
                 source="agent",
             )
@@ -530,7 +524,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
             output = finish.return_values.get("output", "")
             self.session.add_fact(
                 fact_id=f"finish_{run_id.hex[:8]}",
-                text=f"Agent finished: {_truncate(output)}",
+                text=f"Agent finished: {truncate(output)}",
                 confidence=1.0,
                 source="agent",
             )
@@ -578,7 +572,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         try:
             self.session.tool_call(
                 tool=retriever_name,
-                input_data=_truncate(query),
+                input_data=truncate(query),
                 output_data=f"Retrieved {len(documents)} documents",
                 duration_ms=duration_ms,
             )
@@ -604,7 +598,7 @@ class LCTLCallbackHandler(BaseCallbackHandler):
         try:
             self.session.tool_call(
                 tool=retriever_name,
-                input_data=_truncate(query),
+                input_data=truncate(query),
                 output_data=f"ERROR: {type(error).__name__}: {error}",
                 duration_ms=duration_ms,
             )
@@ -834,6 +828,5 @@ __all__ = [
     "LCTLChain",
     "trace_chain",
     "is_available",
-    "_truncate",
     "_extract_token_counts",
 ]

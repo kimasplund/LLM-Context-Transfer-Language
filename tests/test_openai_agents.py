@@ -580,26 +580,26 @@ class TestHelperFunctions:
 
     def test_truncate_short_text(self):
         """Test _truncate with short text."""
-        from lctl.integrations.openai_agents import _truncate
+        from lctl.integrations.base import truncate
 
         text = "Short text"
-        assert _truncate(text) == text
+        assert truncate(text) == text
 
     def test_truncate_long_text(self):
         """Test _truncate with long text."""
-        from lctl.integrations.openai_agents import _truncate
+        from lctl.integrations.base import truncate
 
         text = "x" * 300
-        result = _truncate(text, max_length=100)
+        result = truncate(text, max_length=100)
         assert len(result) == 100
         assert result.endswith("...")
 
     def test_truncate_exact_length(self):
         """Test _truncate with exact length text."""
-        from lctl.integrations.openai_agents import _truncate
+        from lctl.integrations.base import truncate
 
         text = "x" * 200
-        result = _truncate(text, max_length=200)
+        result = truncate(text, max_length=200)
         assert result == text
 
     def test_extract_usage_with_usage_object(self):
